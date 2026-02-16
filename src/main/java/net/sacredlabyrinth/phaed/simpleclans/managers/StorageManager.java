@@ -10,6 +10,7 @@ import net.sacredlabyrinth.phaed.simpleclans.storage.SQLiteCore;
 import net.sacredlabyrinth.phaed.simpleclans.utils.ChatUtils;
 import net.sacredlabyrinth.phaed.simpleclans.utils.YAMLSerializer;
 import net.sacredlabyrinth.phaed.simpleclans.uuid.UUIDFetcher;
+import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -803,28 +804,36 @@ public final class StorageManager {
     }
 
     /**
+     * Synchronizes player data in the database asynchronously, handling duplicates
+     *
+     * @param player the player to sync
+     */
+    public void syncPlayerDataAsync(@NotNull Player player) {
+        final String currentName = player.getName();
+        final UUID currentUuid = player.getUniqueId();
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                syncPlayerData(currentName, currentUuid);
+            }
+        }.runTaskAsynchronously(plugin);
+    }
+
+    /**
      * Synchronizes player data in the database, handling duplicates
      * - If name differs but UUID matches: update name
      * - If names match but UUIDs differ: update UUID
      * - If both name and UUID exist in different records: merge and delete duplicates
      *
-     * @param player the player to sync
+     * @param currentName the player's current name
+     * @param currentUuid the player's current UUID
      */
-    public void syncPlayerData(@NotNull Player player) {
+    private void syncPlayerData(@NotNull String currentName, @NotNull UUID currentUuid) {
         try {
-            String currentName = player.getName();
-            UUID currentUuid = player.getUniqueId();
-
             ClanPlayer byName = retrieveClanPlayerByName(currentName);
             ClanPlayer byUuid = retrieveOneClanPlayer(currentUuid);
 
-            // Case 1: No records exist - create new
-            if (byName == null && byUuid == null) {
-                plugin.getLogger().info(String.format("No existing records for %s (%s)", currentName, currentUuid));
-                return;
-            }
-
-            // Case 2: Found by name only, UUID differs - update UUID
+            // Case 1: Found by name only, UUID differs - update UUID
             if (byName != null && byUuid == null) {
                 plugin.getLogger().warning(String.format("Correcting UUID for %s: %s → %s", byName.getName(), byName.getUniqueId(), currentUuid));
 
@@ -841,63 +850,66 @@ public final class StorageManager {
                     ps.executeUpdate();
                 }
 
-                // Update in-memory object
-                byName.setUniqueId(currentUuid);
-                byName.setName(currentName);
-                byName.setLastSeen(System.currentTimeMillis());
+                // Update in-memory references on the main thread
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    byName.setUniqueId(currentUuid);
+                    byName.setName(currentName);
+                    byName.setLastSeen(System.currentTimeMillis());
+                    plugin.getClanManager().deleteClanPlayerFromMemory(oldUuid);
+                    plugin.getClanManager().importClanPlayer(byName);
+                });
 
-                // Update in-memory reference
-                plugin.getClanManager().deleteClanPlayerFromMemory(oldUuid);
-                plugin.getClanManager().importClanPlayer(byName);
-                
                 plugin.getLogger().info(String.format("UUID corrected in database: %s", currentUuid));
                 return;
             }
 
-            // Case 3: Found by UUID only, name differs - update name
-            if (byName == null) {
+            // Case 2: Found by UUID only, name differs - update name
+            if (byName == null && byUuid != null) {
                 plugin.getLogger().info(String.format("Correcting name for %s to %s (%s)", byUuid.getName(), currentName, currentUuid));
 
                 byUuid.setName(currentName);
                 byUuid.setLastSeen(System.currentTimeMillis());
-                updateClanPlayer(byUuid, true); // Force immediate update
+                updateClanPlayer(byUuid, true);
                 plugin.getLogger().info(String.format("Player name updated in database: %s", currentName));
                 return;
             }
 
-            // Case 4: Both found and they're the same record - just update
-            if (byName.getUniqueId().equals(byUuid.getUniqueId())) {
+            // Case 3: Both found and they're the same record - just update
+            if (byName != null && byName.getUniqueId().equals(byUuid.getUniqueId())) {
                 byUuid.setName(currentName);
                 byUuid.setLastSeen(System.currentTimeMillis());
-                updateClanPlayer(byUuid, true); // Force immediate update
-                plugin.getLogger().info(String.format("Player data synchronized: %s", currentName));
+                updateClanPlayer(byUuid, true);
                 return;
             }
 
-            // Case 5: Both found but different records - merge duplicates
-            plugin.getLogger().warning(String.format("Duplicate detection!\n" + " - Record A: %s/%s\n" + " - Record B: %s/%s\n" + "➜ Merging records.", byName.getName(), byName.getUniqueId(), byUuid.getName(), byUuid.getUniqueId()));
+            // Case 4: Both found but different records - merge duplicates
+            if (byName != null && byUuid != null) {
+                plugin.getLogger().warning(String.format("Duplicate detection!%n - Record A: %s/%s%n - Record B: %s/%s%n➜ Merging records.", byName.getName(), byName.getUniqueId(), byUuid.getName(), byUuid.getUniqueId()));
 
-            UUID oldByNameUuid = byName.getUniqueId();
+                UUID oldByNameUuid = byName.getUniqueId();
 
-            // Merge data (keep the byUuid record as base, merge stats from byName)
-            ClanPlayer merged = mergeClanPlayers(byUuid, byName);
-            merged.setUniqueId(currentUuid);
-            merged.setName(currentName);
+                // Merge data (keep the byUuid record as base, merge stats from byName)
+                ClanPlayer merged = mergeClanPlayers(byUuid, byName);
+                merged.setUniqueId(currentUuid);
+                merged.setName(currentName);
 
-            // Delete the record with wrong UUID only
-            String deleteByName = "DELETE FROM `" + getPrefixedTable("players") + "` WHERE uuid = '" + oldByNameUuid + "';";
-            core.executeUpdate(deleteByName);
+                // Delete the record with wrong UUID only
+                String deleteByName = "DELETE FROM `" + getPrefixedTable("players") + "` WHERE uuid = '" + oldByNameUuid + "';";
+                core.executeUpdate(deleteByName);
 
-            // Update the kept record with merged data
-            updateClanPlayer(merged, true);
+                // Update the kept record with merged data
+                updateClanPlayer(merged, true);
 
-            // Update in-memory
-            plugin.getClanManager().deleteClanPlayerFromMemory(oldByNameUuid);
-            plugin.getClanManager().importClanPlayer(merged);
-            
-            plugin.getLogger().info(String.format("Duplicate records merged for %s (%s)", currentName, currentUuid));
+                // Update in-memory on the main thread
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    plugin.getClanManager().deleteClanPlayerFromMemory(oldByNameUuid);
+                    plugin.getClanManager().importClanPlayer(merged);
+                });
+
+                plugin.getLogger().info(String.format("Duplicate records merged for %s (%s)", currentName, currentUuid));
+            }
         } catch (SQLException e) {
-            plugin.getServer().getLogger().log(Level.SEVERE, "[SimpleClans] Error synchronizing player data for " + player.getName(), e);
+            plugin.getServer().getLogger().log(Level.SEVERE, "[SimpleClans] Error synchronizing player data for " + currentName, e);
         }
     }
 
