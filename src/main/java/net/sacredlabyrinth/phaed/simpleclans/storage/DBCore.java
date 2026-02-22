@@ -42,8 +42,9 @@ public interface DBCore {
      * @return the result set or null if the query failed
      */
     default @Nullable ResultSet select(String query) {
+        Connection connection = getConnection();
         try {
-            return getConnection().createStatement().executeQuery(query);
+            return connection.createStatement().executeQuery(query);
         } catch (SQLException ex) {
             log.log(Level.SEVERE, String.format("Error executing query: %s", query), ex);
         }
@@ -56,8 +57,8 @@ public interface DBCore {
      * @return true if the statement was executed
      */
     default boolean execute(String query) {
-        try {
-            getConnection().createStatement().execute(query);
+        try (java.sql.Statement statement = getConnection().createStatement()) {
+            statement.execute(query);
             return true;
         } catch (SQLException ex) {
             log.log(Level.SEVERE, String.format("Error executing query: %s", query), ex);
@@ -71,8 +72,7 @@ public interface DBCore {
      * @return true if the table exists
      */
     default boolean existsTable(String table) {
-        try {
-            ResultSet tables = getConnection().getMetaData().getTables(null, null, table, null);
+        try (ResultSet tables = getConnection().getMetaData().getTables(null, null, table, null)) {
             return tables.next();
         } catch (SQLException ex) {
             log.log(Level.SEVERE, String.format("Error checking if table %s exists", table), ex);
@@ -88,8 +88,7 @@ public interface DBCore {
      * @return true if the column exists
      */
     default boolean existsColumn(String table, String column) {
-        try {
-            ResultSet col = getConnection().getMetaData().getColumns(null, null, table, column);
+        try (ResultSet col = getConnection().getMetaData().getColumns(null, null, table, column)) {
             return col.next();
         } catch (Exception ex) {
             log.log(Level.SEVERE, String.format("Error checking if column %s exists in table %s", column, table), ex);
@@ -100,9 +99,10 @@ public interface DBCore {
     default void executeUpdate(String query) {
         final Exception exception = new Exception(); // Stores a reference to the caller's stack trace for async tasks
         Runnable executeUpdate = () -> {
-            if (getConnection() != null) {
-                try {
-                    getConnection().createStatement().executeUpdate(query);
+            Connection connection = getConnection();
+            if (connection != null) {
+                try (java.sql.Statement statement = connection.createStatement()) {
+                    statement.executeUpdate(query);
                 } catch (SQLException ex) {
                     log.log(Level.SEVERE, String.format("Error executing query: %s", query), ex);
                     if (!Bukkit.isPrimaryThread()) {
