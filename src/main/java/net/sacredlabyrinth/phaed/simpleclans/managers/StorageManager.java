@@ -1147,7 +1147,7 @@ public final class StorageManager {
      * @param type     the kill type
      */
     public void insertKill(@NotNull ClanPlayer attacker, @NotNull ClanPlayer victim, @NotNull String type, @NotNull LocalDateTime time) {
-        String query = "INSERT INTO `sc_kills` (  `attacker_uuid`, `attacker`, `attacker_tag`, `victim_uuid`, " + "`victim`, `victim_tag`, `kill_type`, `created_at`) ";
+        String query = "INSERT INTO `" + getPrefixedTable("kills") + "` (  `attacker_uuid`, `attacker`, `attacker_tag`, `victim_uuid`, " + "`victim`, `victim_tag`, `kill_type`, `created_at`) ";
         String values = "VALUES ( '" + attacker.getUniqueId() + "','" + attacker.getName() + "','" + attacker.getTag() + "','" + victim.getUniqueId() + "','" + victim.getName() + "','" + victim.getTag() + "','" + type + "','" + time + "');";
         core.executeUpdate(query + values);
     }
@@ -1389,7 +1389,7 @@ public final class StorageManager {
 
         // From 2.19.3 to 2.20.0
         if (!core.existsColumn(getPrefixedTable("kills"), "created_at")) {
-            query = "ALTER TABLE sc_kills ADD `created_at` datetime NULL;";
+            query = "ALTER TABLE `" + getPrefixedTable("kills") + "` ADD `created_at` datetime NULL;";
             core.execute(query);
         }
     }
