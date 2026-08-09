@@ -16,13 +16,15 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * Translates SimpleClans' own Bukkit events into Discord embeds on the
- * {@code alerts} webhook. Every handler runs at MONITOR priority after
- * cancellation checks, so only actions that really happened are logged.
+ * Translates SimpleClans' own Bukkit events into webhook events. All embed
+ * content lives in discord.yml as templates; this listener only fills the
+ * {placeholder} variables. Handlers run at MONITOR priority after cancellation
+ * checks, so only actions that really happened are logged.
  */
 public class DiscordWebhookListener implements Listener {
 
@@ -36,19 +38,18 @@ public class DiscordWebhookListener implements Listener {
         return plugin.getDiscordWebhookService();
     }
 
-    private @NotNull String tagOf(@NotNull Clan clan) {
-        return clan.getTag().toUpperCase();
+    private void clanVars(@NotNull Map<String, String> vars, @NotNull Clan clan) {
+        vars.put("clan", clan.getName());
+        vars.put("tag", clan.getTag().toUpperCase());
     }
 
-    private void playerFields(@NotNull DiscordEmbed embed, @NotNull ClanPlayer cp) {
-        embed.field("Jogador", cp.getName());
+    private void actorVars(@NotNull DiscordWebhookService service, @NotNull Map<String, String> vars,
+                           @NotNull ClanPlayer cp) {
+        vars.put("player", cp.getName());
         UUID uuid = cp.getUniqueId();
         if (uuid != null) {
-            embed.field("UUID", uuid.toString());
-        }
-        DiscordWebhookService service = service();
-        if (service != null) {
-            embed.thumbnail(service.getAvatarProvider().avatarUrl(uuid, cp.getName()));
+            vars.put("uuid", uuid.toString());
+            vars.put("player_avatar_url", service.avatarUrl(uuid, cp.getName()));
         }
     }
 
@@ -59,22 +60,16 @@ public class DiscordWebhookListener implements Listener {
             return;
         }
         Clan clan = event.getClan();
-        DiscordEmbed embed = DiscordEmbed.of("🏰 Clã criado", DiscordEmbed.COLOR_GREEN)
-                .field("Clã", clan.getName())
-                .field("TAG", tagOf(clan))
-                .footer("SimpleClans • Clãs");
-        List<ClanPlayer> leaders = clan.getLeaders();
+        Map<String, String> vars = service.newVars();
+        clanVars(vars, clan);
         UUID founderUuid = null;
+        List<ClanPlayer> leaders = clan.getLeaders();
         if (!leaders.isEmpty()) {
             ClanPlayer founder = leaders.get(0);
             founderUuid = founder.getUniqueId();
-            embed.field("Líder", founder.getName());
-            if (founderUuid != null) {
-                embed.field("UUID", founderUuid.toString());
-            }
-            embed.thumbnail(service.getAvatarProvider().avatarUrl(founderUuid, founder.getName()));
+            actorVars(service, vars, founder);
         }
-        service.alert("clan-created", founderUuid, embed);
+        service.fire("clan-created", founderUuid, vars);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -85,20 +80,24 @@ public class DiscordWebhookListener implements Listener {
         }
         Clan clan = event.getClan();
         CommandSender sender = event.getSender();
-        DiscordEmbed embed = DiscordEmbed.of("💥 Clã deletado", DiscordEmbed.COLOR_RED)
-                .field("Clã", clan.getName())
-                .field("TAG", tagOf(clan))
-                .field("Deletado por", sender != null ? sender.getName() : null)
-                .footer("SimpleClans • Clãs");
+        Map<String, String> vars = service.newVars();
+        clanVars(vars, clan);
         boolean byMember = sender instanceof Player && clan.isMember(((Player) sender).getUniqueId());
         if (byMember) {
             UUID uuid = ((Player) sender).getUniqueId();
-            embed.field("UUID", uuid.toString());
-            embed.thumbnail(service.getAvatarProvider().avatarUrl(uuid, sender.getName()));
-            service.alert("clan-disbanded", uuid, embed);
+            vars.put("player", sender.getName());
+            vars.put("uuid", uuid.toString());
+            vars.put("player_avatar_url", service.avatarUrl(uuid, sender.getName()));
+            service.fire("clan-disbanded", uuid, vars);
         } else {
             // console or a non-member (staff) disbanding: audit channel
-            service.staff("clan-disbanded", embed);
+            vars.put("staff", sender != null ? sender.getName() : "console");
+            if (sender instanceof Player) {
+                UUID uuid = ((Player) sender).getUniqueId();
+                vars.put("staff_uuid", uuid.toString());
+                vars.put("staff_avatar_url", service.avatarUrl(uuid, sender.getName()));
+            }
+            service.fire("clan-disbanded-staff", null, vars);
         }
     }
 
@@ -108,14 +107,10 @@ public class DiscordWebhookListener implements Listener {
         if (service == null) {
             return;
         }
-        ClanPlayer cp = event.getClanPlayer();
-        Clan clan = event.getClan();
-        DiscordEmbed embed = DiscordEmbed.of("✅ Jogador entrou no clã", DiscordEmbed.COLOR_GREEN)
-                .footer("SimpleClans • Membros");
-        playerFields(embed, cp);
-        embed.field("Clã", clan.getName());
-        embed.field("TAG", tagOf(clan));
-        service.alert("player-joined", cp.getUniqueId(), embed);
+        Map<String, String> vars = service.newVars();
+        actorVars(service, vars, event.getClanPlayer());
+        clanVars(vars, event.getClan());
+        service.fire("player-joined", event.getClanPlayer().getUniqueId(), vars);
     }
 
     /**
@@ -127,14 +122,10 @@ public class DiscordWebhookListener implements Listener {
         if (service == null) {
             return;
         }
-        ClanPlayer cp = event.getClanPlayer();
-        Clan clan = event.getClan();
-        DiscordEmbed embed = DiscordEmbed.of("🚪 Jogador saiu do clã", DiscordEmbed.COLOR_YELLOW)
-                .footer("SimpleClans • Membros");
-        playerFields(embed, cp);
-        embed.field("Clã", clan.getName());
-        embed.field("TAG", tagOf(clan));
-        service.alert("player-left", cp.getUniqueId(), embed);
+        Map<String, String> vars = service.newVars();
+        actorVars(service, vars, event.getClanPlayer());
+        clanVars(vars, event.getClan());
+        service.fire("player-left", event.getClanPlayer().getUniqueId(), vars);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -143,13 +134,10 @@ public class DiscordWebhookListener implements Listener {
         if (service == null) {
             return;
         }
-        ClanPlayer cp = event.getClanPlayer();
-        DiscordEmbed embed = DiscordEmbed.of("⬆️ Jogador promovido a líder", DiscordEmbed.COLOR_BLUE)
-                .footer("SimpleClans • Membros");
-        playerFields(embed, cp);
-        embed.field("Clã", event.getClan().getName());
-        embed.field("TAG", tagOf(event.getClan()));
-        service.alert("promote", cp.getUniqueId(), embed);
+        Map<String, String> vars = service.newVars();
+        actorVars(service, vars, event.getClanPlayer());
+        clanVars(vars, event.getClan());
+        service.fire("promote", event.getClanPlayer().getUniqueId(), vars);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -158,73 +146,51 @@ public class DiscordWebhookListener implements Listener {
         if (service == null) {
             return;
         }
-        ClanPlayer cp = event.getClanPlayer();
-        DiscordEmbed embed = DiscordEmbed.of("⬇️ Líder rebaixado a membro", DiscordEmbed.COLOR_YELLOW)
-                .footer("SimpleClans • Membros");
-        playerFields(embed, cp);
-        embed.field("Clã", event.getClan().getName());
-        embed.field("TAG", tagOf(event.getClan()));
-        service.alert("demote", cp.getUniqueId(), embed);
+        Map<String, String> vars = service.newVars();
+        actorVars(service, vars, event.getClanPlayer());
+        clanVars(vars, event.getClan());
+        service.fire("demote", event.getClanPlayer().getUniqueId(), vars);
+    }
+
+    private void twoClanVars(@NotNull DiscordWebhookService service, @NotNull String eventKey,
+                             @NotNull Clan first, @NotNull Clan second) {
+        Map<String, String> vars = service.newVars();
+        clanVars(vars, first);
+        vars.put("clan2", second.getName());
+        vars.put("tag2", second.getTag().toUpperCase());
+        service.fire(eventKey, null, vars);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onAllyAdd(AllyClanAddEvent event) {
         DiscordWebhookService service = service();
-        if (service == null) {
-            return;
+        if (service != null) {
+            twoClanVars(service, "ally-added", event.getClanFirst(), event.getClanSecond());
         }
-        DiscordEmbed embed = DiscordEmbed.of("🤝 Aliança criada", DiscordEmbed.COLOR_GREEN)
-                .field("Clã", event.getClanFirst().getName())
-                .field("TAG", tagOf(event.getClanFirst()))
-                .field("Clã aliado", event.getClanSecond().getName())
-                .field("TAG aliada", tagOf(event.getClanSecond()))
-                .footer("SimpleClans • Alianças");
-        service.alert("ally-added", null, embed);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onAllyRemove(AllyClanRemoveEvent event) {
         DiscordWebhookService service = service();
-        if (service == null) {
-            return;
+        if (service != null) {
+            twoClanVars(service, "ally-removed", event.getClanFirst(), event.getClanSecond());
         }
-        DiscordEmbed embed = DiscordEmbed.of("💔 Aliança desfeita", DiscordEmbed.COLOR_YELLOW)
-                .field("Clã", event.getClanFirst().getName())
-                .field("TAG", tagOf(event.getClanFirst()))
-                .field("Ex-aliado", event.getClanSecond().getName())
-                .field("TAG do ex-aliado", tagOf(event.getClanSecond()))
-                .footer("SimpleClans • Alianças");
-        service.alert("ally-removed", null, embed);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onRivalAdd(RivalClanAddEvent event) {
         DiscordWebhookService service = service();
-        if (service == null) {
-            return;
+        if (service != null) {
+            twoClanVars(service, "rival-added", event.getClanFirst(), event.getClanSecond());
         }
-        DiscordEmbed embed = DiscordEmbed.of("⚔️ Rivalidade criada", DiscordEmbed.COLOR_RED)
-                .field("Clã", event.getClanFirst().getName())
-                .field("TAG", tagOf(event.getClanFirst()))
-                .field("Rival", event.getClanSecond().getName())
-                .field("TAG rival", tagOf(event.getClanSecond()))
-                .footer("SimpleClans • Rivalidades");
-        service.alert("rival-added", null, embed);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onRivalRemove(RivalClanRemoveEvent event) {
         DiscordWebhookService service = service();
-        if (service == null) {
-            return;
+        if (service != null) {
+            twoClanVars(service, "rival-removed", event.getClanFirst(), event.getClanSecond());
         }
-        DiscordEmbed embed = DiscordEmbed.of("🕊️ Rivalidade encerrada", DiscordEmbed.COLOR_GREEN)
-                .field("Clã", event.getClanFirst().getName())
-                .field("TAG", tagOf(event.getClanFirst()))
-                .field("Ex-rival", event.getClanSecond().getName())
-                .field("TAG do ex-rival", tagOf(event.getClanSecond()))
-                .footer("SimpleClans • Rivalidades");
-        service.alert("rival-removed", null, embed);
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -234,13 +200,14 @@ public class DiscordWebhookListener implements Listener {
             return;
         }
         Clan clan = event.getClan();
-        DiscordEmbed embed = DiscordEmbed.of("🏷️ TAG alterada", DiscordEmbed.COLOR_BLUE)
-                .field("Clã", clan.getName())
-                .field("TAG anterior", ChatUtils.stripColors(clan.getColorTag()))
-                .field("Nova TAG", ChatUtils.stripColors(event.getNewTag()))
-                .field("Alterada por", event.getPlayer().getName())
-                .footer("SimpleClans • Clãs");
-        service.alert("tag-changed", event.getPlayer().getUniqueId(), embed);
+        Map<String, String> vars = service.newVars();
+        clanVars(vars, clan);
+        vars.put("old_tag", ChatUtils.stripColors(clan.getColorTag()));
+        vars.put("new_tag", ChatUtils.stripColors(event.getNewTag()));
+        vars.put("player", event.getPlayer().getName());
+        vars.put("uuid", event.getPlayer().getUniqueId().toString());
+        vars.put("player_avatar_url", service.avatarUrl(event.getPlayer().getUniqueId(), event.getPlayer().getName()));
+        service.fire("tag-changed", event.getPlayer().getUniqueId(), vars);
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -249,12 +216,14 @@ public class DiscordWebhookListener implements Listener {
         if (service == null) {
             return;
         }
-        DiscordEmbed embed = DiscordEmbed.of("🏠 Base do clã definida", DiscordEmbed.COLOR_BLUE)
-                .field("Clã", event.getClan().getName())
-                .field("TAG", tagOf(event.getClan()))
-                .field("Definida por", event.getClanPlayer() != null ? event.getClanPlayer().getName() : null)
-                .footer("SimpleClans • Configurações do clã");
-        service.alert("home-set", event.getClanPlayer() != null ? event.getClanPlayer().getUniqueId() : null, embed);
+        Map<String, String> vars = service.newVars();
+        clanVars(vars, event.getClan());
+        UUID uuid = null;
+        if (event.getClanPlayer() != null) {
+            uuid = event.getClanPlayer().getUniqueId();
+            actorVars(service, vars, event.getClanPlayer());
+        }
+        service.fire("home-set", uuid, vars);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -268,22 +237,19 @@ public class DiscordWebhookListener implements Listener {
             return;
         }
         ClanPlayer requester = request.getRequester();
-        if (request.getType() == ClanRequest.INVITE) {
-            DiscordEmbed embed = DiscordEmbed.of("✉️ Convite enviado", DiscordEmbed.COLOR_BLUE)
-                    .field("Convidado", request.getTarget())
-                    .field("Convidado por", requester != null ? requester.getName() : null)
-                    .field("Clã", request.getClan().getName())
-                    .field("TAG", tagOf(request.getClan()))
-                    .footer("SimpleClans • Convites");
-            service.alert("invite-sent", requester != null ? requester.getUniqueId() : null, embed);
-        } else if (request.getType() == ClanRequest.CREATE_ALLY) {
-            DiscordEmbed embed = DiscordEmbed.of("🤝 Proposta de aliança enviada", DiscordEmbed.COLOR_BLUE)
-                    .field("De", request.getClan().getName())
-                    .field("Para", request.getTarget())
-                    .field("Proposta por", requester != null ? requester.getName() : null)
-                    .footer("SimpleClans • Alianças");
-            service.alert("ally-requested", requester != null ? requester.getUniqueId() : null, embed);
+        if (request.getType() != ClanRequest.INVITE && request.getType() != ClanRequest.CREATE_ALLY) {
+            return;
         }
+        Map<String, String> vars = service.newVars();
+        clanVars(vars, request.getClan());
+        vars.put("target", request.getTarget());
+        UUID requesterUuid = null;
+        if (requester != null) {
+            requesterUuid = requester.getUniqueId();
+            actorVars(service, vars, requester);
+        }
+        service.fire(request.getType() == ClanRequest.INVITE ? "invite-sent" : "ally-requested",
+                requesterUuid, vars);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -298,22 +264,16 @@ public class DiscordWebhookListener implements Listener {
         }
         if (request.getType() == ClanRequest.INVITE) {
             boolean accepted = !request.getAccepts().isEmpty();
-            DiscordEmbed embed = DiscordEmbed.of(
-                            accepted ? "📩 Convite aceito" : "📭 Convite recusado",
-                            accepted ? DiscordEmbed.COLOR_GREEN : DiscordEmbed.COLOR_YELLOW)
-                    .field("Convidado", request.getTarget())
-                    .field("Clã", request.getClan().getName())
-                    .field("TAG", tagOf(request.getClan()))
-                    .footer("SimpleClans • Convites");
-            service.alert(accepted ? "invite-accepted" : "invite-denied", null, embed);
+            Map<String, String> vars = service.newVars();
+            clanVars(vars, request.getClan());
+            vars.put("target", request.getTarget());
+            service.fire(accepted ? "invite-accepted" : "invite-denied", null, vars);
         } else if (request.getType() == ClanRequest.RENAME && request.getDenies().isEmpty()) {
             // leaders approved the rename; the clan already carries the new name
-            DiscordEmbed embed = DiscordEmbed.of("📛 Nome do clã alterado", DiscordEmbed.COLOR_BLUE)
-                    .field("Clã", request.getClan().getName())
-                    .field("TAG", tagOf(request.getClan()))
-                    .field("Novo nome", request.getTarget())
-                    .footer("SimpleClans • Clãs");
-            service.alert("name-changed", null, embed);
+            Map<String, String> vars = service.newVars();
+            clanVars(vars, request.getClan());
+            vars.put("new_value", request.getTarget());
+            service.fire("name-changed", null, vars);
         }
         // joining/ally results already produce their own dedicated events
     }
@@ -324,13 +284,11 @@ public class DiscordWebhookListener implements Listener {
         if (service == null) {
             return;
         }
-        String clans = event.getWar().getClans().stream()
+        Map<String, String> vars = service.newVars();
+        vars.put("clans", event.getWar().getClans().stream()
                 .map(Clan::getName)
-                .collect(Collectors.joining(" x "));
-        DiscordEmbed embed = DiscordEmbed.of("🔥 Guerra iniciada", DiscordEmbed.COLOR_RED)
-                .field("Clãs", clans, false)
-                .footer("SimpleClans • Guerras");
-        service.alert("war-started", null, embed);
+                .collect(Collectors.joining(" x ")));
+        service.fire("war-started", null, vars);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -339,13 +297,13 @@ public class DiscordWebhookListener implements Listener {
         if (service == null) {
             return;
         }
-        String clans = event.getWar().getClans().stream()
+        Map<String, String> vars = service.newVars();
+        vars.put("clans", event.getWar().getClans().stream()
                 .map(Clan::getName)
-                .collect(Collectors.joining(" x "));
-        DiscordEmbed embed = DiscordEmbed.of("🏳️ Guerra encerrada", DiscordEmbed.COLOR_GREEN)
-                .field("Clãs", clans, false)
-                .field("Motivo", event.getReason() != null ? event.getReason().name() : null)
-                .footer("SimpleClans • Guerras");
-        service.alert("war-ended", null, embed);
+                .collect(Collectors.joining(" x ")));
+        if (event.getReason() != null) {
+            vars.put("reason", event.getReason().name());
+        }
+        service.fire("war-ended", null, vars);
     }
 }

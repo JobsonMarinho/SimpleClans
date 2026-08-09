@@ -1,26 +1,32 @@
-# ============================================================
-#  SimpleClans - Webhooks do Discord
-# ============================================================
-#  Logs de atividade dos clãs enviados como embeds para o Discord.
+# =====================================================================
+#  SimpleClans - Sistema de Webhooks / Auditoria via Discord
+# =====================================================================
+#  - Tudo é enviado de forma ASSÍNCRONA. Falha no Discord NUNCA afeta
+#    clãs, membros, alianças ou o banco de dados.
+#  - Falhas são registradas em logs/discord.log.
+#  - Anti-flood com cooldown por jogador, por evento, fila e agrupamento.
+#  - Cores de embed em formato DECIMAL (ex.: 5763719 = verde Discord).
+#  - Avatares/skins via Minotar (placeholders {*_avatar_url}).
 #
-#  Categorias:
-#    alerts    -> atividade normal dos clãs (criação, membros, alianças...)
-#    staff     -> auditoria de comandos administrativos
-#    technical -> erros técnicos (banco de dados, falhas de operação)
-#
-#  Cada categoria usa uma webhook URL própria. Crie a webhook no canal
-#  desejado do Discord (Configurações do canal > Integrações > Webhooks)
-#  e cole a URL abaixo.
-#
-#  O envio é 100% assíncrono, com fila, anti-flood e respeito ao rate
-#  limit do Discord. Se o Discord estiver fora do ar, nada no plugin
-#  é afetado.
-# ============================================================
+#  Placeholders disponíveis (variam por evento; ausentes viram "—"):
+#    {player} {uuid} {player_avatar_url}     -> quem fez a ação
+#    {target} {target_uuid} {target_avatar_url} -> jogador afetado
+#    {staff} {staff_uuid} {staff_avatar_url} -> staff responsável
+#    {clan} {tag} {clan2} {tag2}             -> clãs envolvidos
+#    {old_tag} {new_tag} {old_value} {new_value}
+#    {action} {reason} {clans} {context} {detail}
+#    {date} {server}
+# =====================================================================
+
 discord:
   enabled: false
-  # Nome exibido como autor das mensagens
-  username: "SimpleClans"
 
+  # -------------------------------------------------------------------
+  #  Múltiplos webhooks (cada evento aponta para um destes por nome).
+  #    alerts    -> atividade normal dos clãs
+  #    staff     -> auditoria de comandos administrativos
+  #    technical -> erros técnicos
+  # -------------------------------------------------------------------
   webhooks:
     alerts:
       enabled: true
@@ -32,53 +38,548 @@ discord:
       enabled: true
       url: ""
 
+  # -------------------------------------------------------------------
+  #  Comportamento de envio HTTP.
+  # -------------------------------------------------------------------
   settings:
-    # Timeout das requisições HTTP (ms)
     timeout-ms: 5000
-    # Novas tentativas em falhas temporárias (5xx / erro de rede)
+    retry-on-fail: true
     max-retries: 2
-    # Intervalo mínimo entre envios por webhook (o Discord aceita ~30 req/min
-    # por webhook; 2000ms mantém uma folga segura)
+    # Intervalo mínimo entre envios por webhook (Discord: ~30 req/min).
     min-send-interval-ms: 2000
+    log-failures: true
+    log-file: "logs/discord.log"
+    # Nome exibido como autor da mensagem.
+    username: "SimpleClans"
 
+  # -------------------------------------------------------------------
+  #  Anti-flood global.
+  # -------------------------------------------------------------------
   anti-flood:
-    # Tamanho máximo da fila; cheia = mensagens novas são descartadas
-    queue-max-size: 100
-    # De quanto em quanto tempo a fila é drenada (segundos)
-    flush-interval-seconds: 3
-    # Cooldown global por tipo de evento (segundos; 0 = desligado)
-    per-event-cooldown-seconds: 2
-    # Cooldown por (evento, jogador) (segundos; 0 = desligado)
-    per-player-cooldown-seconds: 5
-    # Eventos críticos (staff/technical) ignoram o anti-flood
-    ignore-for-critical: true
-    # Janela de deduplicação de erros técnicos repetidos (segundos)
+    enabled: true
+    # Eventos HIGH/CRITICAL ignoram o anti-flood.
+    ignore-anti-flood-for-critical: true
+
+    per-player:
+      enabled: true
+      cooldown-seconds: 10
+
+    per-event:
+      enabled: true
+      cooldown-seconds: 3
+
+    queue:
+      enabled: true
+      max-size: 100
+      flush-interval-seconds: 5
+
+    aggregate:
+      enabled: true
+      same-event-window-seconds: 30
+
+    # Janela de deduplicação de erros técnicos repetidos (segundos).
     technical-dedupe-seconds: 300
 
-  # Liga/desliga cada tipo de evento. Eventos não listados ficam ligados.
-  # Observação: uma expulsão também gera "player-left" (a saída em si);
-  # desligue um dos dois se preferir apenas um registro.
+  # -------------------------------------------------------------------
+  #  Menção de cargo para eventos de prioridade alta.
+  # -------------------------------------------------------------------
+  priority:
+    mention-role:
+      enabled: false
+      role-id: "123456789"
+      only-for:
+        - "technical-error"
+
+  # -------------------------------------------------------------------
+  #  Avatar / skin do jogador (Minotar).
+  # -------------------------------------------------------------------
+  player-avatar:
+    enabled: true
+    provider: "minotar"
+
+    minotar:
+      # Usa UUID (imune a troca de nick) em vez do nick como identificador.
+      # Obs.: contas Bedrock (Floodgate) podem não resolver skin no Minotar.
+      use-uuid: true
+
+      # avatar = cabeça | helm = cabeça+capacete | cube = isométrica
+      # body = corpo inteiro | bust = busto | skin = skin completa
+      type: "helm"
+      size: 100
+
+      urls:
+        avatar: "https://minotar.net/avatar/{identifier}/{size}.png"
+        helm: "https://minotar.net/helm/{identifier}/{size}.png"
+        cube: "https://minotar.net/cube/{identifier}/{size}.png"
+        body: "https://minotar.net/body/{identifier}/{size}.png"
+        bust: "https://minotar.net/bust/{identifier}/{size}.png"
+        skin: "https://minotar.net/skin/{identifier}"
+
+    fallback:
+      enabled: true
+      identifier: "MHF_Steve"
+
+  # ===================================================================
+  #  EVENTOS
+  #  Eventos ausentes deste arquivo nunca disparam.
+  #  Observação: uma expulsão também gera "player-left" (a saída em si);
+  #  desligue um dos dois se preferir apenas um registro.
+  # ===================================================================
   events:
-    clan-created: true
-    clan-disbanded: true
-    player-joined: true
-    player-left: true
-    player-kicked: true
-    invite-sent: true
-    invite-accepted: true
-    invite-denied: true
-    ally-requested: true
-    ally-added: true
-    ally-removed: true
-    rival-added: true
-    rival-removed: true
-    promote: true
-    demote: true
-    tag-changed: true
-    name-changed: true
-    home-set: true
-    war-started: true
-    war-ended: true
-    verify: true
-    staff-action: true
-    technical-error: true
+
+    # ---------------- Ciclo de vida do clã --------------------------
+    clan-created:
+      enabled: true
+      webhook: "alerts"
+      priority: "MEDIUM"
+      use-player-avatar: true
+      embed:
+        title: "🏰 Clã criado"
+        color: 5763719
+        description:
+          - "**Clã:** {clan}"
+          - "**TAG:** {tag}"
+          - "**Líder:** {player}"
+          - "**UUID:** `{uuid}`"
+          - ""
+          - "**Servidor:** {server}"
+          - "**Data:** {date}"
+        thumbnail:
+          enabled: true
+          url: "{player_avatar_url}"
+        footer: "SimpleClans • Clãs"
+
+    clan-disbanded:
+      enabled: true
+      webhook: "alerts"
+      priority: "MEDIUM"
+      use-player-avatar: true
+      embed:
+        title: "💥 Clã deletado"
+        color: 15548997
+        description:
+          - "**Clã:** {clan}"
+          - "**TAG:** {tag}"
+          - "**Deletado por:** {player}"
+          - "**UUID:** `{uuid}`"
+          - ""
+          - "**Servidor:** {server}"
+          - "**Data:** {date}"
+        thumbnail:
+          enabled: true
+          url: "{player_avatar_url}"
+        footer: "SimpleClans • Clãs"
+
+    clan-disbanded-staff:
+      enabled: true
+      webhook: "staff"
+      priority: "HIGH"
+      use-player-avatar: true
+      embed:
+        title: "💥 Clã deletado pela staff"
+        color: 15548997
+        description:
+          - "**Staff:** {staff}"
+          - "**UUID do staff:** `{staff_uuid}`"
+          - ""
+          - "**Clã:** {clan}"
+          - "**TAG:** {tag}"
+          - ""
+          - "**Servidor:** {server}"
+          - "**Data:** {date}"
+        thumbnail:
+          enabled: true
+          url: "{staff_avatar_url}"
+        footer: "SimpleClans • Auditoria administrativa"
+
+    tag-changed:
+      enabled: true
+      webhook: "alerts"
+      priority: "HIGH"
+      use-player-avatar: true
+      embed:
+        title: "🏷️ TAG alterada"
+        color: 3447003
+        description:
+          - "**Clã:** {clan}"
+          - "**TAG anterior:** {old_tag}"
+          - "**Nova TAG:** {new_tag}"
+          - "**Alterada por:** {player}"
+          - ""
+          - "**Data:** {date}"
+        thumbnail:
+          enabled: true
+          url: "{player_avatar_url}"
+        footer: "SimpleClans • Clãs"
+
+    name-changed:
+      enabled: true
+      webhook: "alerts"
+      priority: "MEDIUM"
+      use-player-avatar: false
+      embed:
+        title: "📛 Nome do clã alterado"
+        color: 3447003
+        description:
+          - "**Clã:** {clan}"
+          - "**TAG:** {tag}"
+          - "**Novo nome:** {new_value}"
+          - ""
+          - "**Data:** {date}"
+        thumbnail:
+          enabled: false
+          url: ""
+        footer: "SimpleClans • Clãs"
+
+    home-set:
+      enabled: true
+      webhook: "alerts"
+      priority: "LOW"
+      use-player-avatar: true
+      embed:
+        title: "🏠 Base do clã definida"
+        color: 3447003
+        description:
+          - "**Clã:** {clan}"
+          - "**TAG:** {tag}"
+          - "**Definida por:** {player}"
+          - ""
+          - "**Data:** {date}"
+        thumbnail:
+          enabled: true
+          url: "{player_avatar_url}"
+        footer: "SimpleClans • Configurações do clã"
+
+    # ---------------- Membros ---------------------------------------
+    player-joined:
+      enabled: true
+      webhook: "alerts"
+      priority: "LOW"
+      use-player-avatar: true
+      embed:
+        title: "✅ Jogador entrou no clã"
+        color: 5763719
+        description:
+          - "**Jogador:** {player}"
+          - "**UUID:** `{uuid}`"
+          - ""
+          - "**Clã:** {clan}"
+          - "**TAG:** {tag}"
+          - "**Data:** {date}"
+        thumbnail:
+          enabled: true
+          url: "{player_avatar_url}"
+        footer: "SimpleClans • Membros"
+
+    player-left:
+      enabled: true
+      webhook: "alerts"
+      priority: "LOW"
+      use-player-avatar: true
+      embed:
+        title: "🚪 Jogador saiu do clã"
+        color: 16705372
+        description:
+          - "**Jogador:** {player}"
+          - "**UUID:** `{uuid}`"
+          - ""
+          - "**Clã:** {clan}"
+          - "**TAG:** {tag}"
+          - "**Data:** {date}"
+        thumbnail:
+          enabled: true
+          url: "{player_avatar_url}"
+        footer: "SimpleClans • Membros"
+
+    player-kicked:
+      enabled: true
+      webhook: "alerts"
+      priority: "MEDIUM"
+      use-player-avatar: true
+      embed:
+        title: "👢 Jogador expulso do clã"
+        color: 16705372
+        description:
+          - "**Jogador:** {target}"
+          - "**UUID:** `{target_uuid}`"
+          - "**Expulso por:** {player}"
+          - ""
+          - "**Clã:** {clan}"
+          - "**TAG:** {tag}"
+          - "**Data:** {date}"
+        thumbnail:
+          enabled: true
+          url: "{target_avatar_url}"
+        footer: "SimpleClans • Membros"
+
+    promote:
+      enabled: true
+      webhook: "alerts"
+      priority: "MEDIUM"
+      use-player-avatar: true
+      embed:
+        title: "⬆️ Jogador promovido a líder"
+        color: 3447003
+        description:
+          - "**Jogador:** {player}"
+          - "**UUID:** `{uuid}`"
+          - ""
+          - "**Clã:** {clan}"
+          - "**TAG:** {tag}"
+          - "**Data:** {date}"
+        thumbnail:
+          enabled: true
+          url: "{player_avatar_url}"
+        footer: "SimpleClans • Membros"
+
+    demote:
+      enabled: true
+      webhook: "alerts"
+      priority: "MEDIUM"
+      use-player-avatar: true
+      embed:
+        title: "⬇️ Líder rebaixado a membro"
+        color: 16705372
+        description:
+          - "**Jogador:** {player}"
+          - "**UUID:** `{uuid}`"
+          - ""
+          - "**Clã:** {clan}"
+          - "**TAG:** {tag}"
+          - "**Data:** {date}"
+        thumbnail:
+          enabled: true
+          url: "{player_avatar_url}"
+        footer: "SimpleClans • Membros"
+
+    # ---------------- Convites --------------------------------------
+    invite-sent:
+      enabled: true
+      webhook: "alerts"
+      priority: "LOW"
+      use-player-avatar: true
+      anti-flood:
+        per-player-cooldown-seconds: 30
+      embed:
+        title: "✉️ Convite enviado"
+        color: 3447003
+        description:
+          - "**Convidado:** {target}"
+          - "**Convidado por:** {player}"
+          - ""
+          - "**Clã:** {clan}"
+          - "**TAG:** {tag}"
+          - "**Data:** {date}"
+        thumbnail:
+          enabled: true
+          url: "{player_avatar_url}"
+        footer: "SimpleClans • Convites"
+
+    invite-accepted:
+      enabled: true
+      webhook: "alerts"
+      priority: "LOW"
+      use-player-avatar: false
+      embed:
+        title: "📩 Convite aceito"
+        color: 5763719
+        description:
+          - "**Convidado:** {target}"
+          - "**Clã:** {clan}"
+          - "**TAG:** {tag}"
+          - "**Data:** {date}"
+        thumbnail:
+          enabled: false
+          url: ""
+        footer: "SimpleClans • Convites"
+
+    invite-denied:
+      enabled: true
+      webhook: "alerts"
+      priority: "LOW"
+      use-player-avatar: false
+      embed:
+        title: "📭 Convite recusado"
+        color: 16705372
+        description:
+          - "**Convidado:** {target}"
+          - "**Clã:** {clan}"
+          - "**TAG:** {tag}"
+          - "**Data:** {date}"
+        thumbnail:
+          enabled: false
+          url: ""
+        footer: "SimpleClans • Convites"
+
+    # ---------------- Alianças e rivalidades ------------------------
+    ally-requested:
+      enabled: true
+      webhook: "alerts"
+      priority: "LOW"
+      use-player-avatar: true
+      embed:
+        title: "🤝 Proposta de aliança enviada"
+        color: 3447003
+        description:
+          - "**De:** {clan} ({tag})"
+          - "**Para:** {target}"
+          - "**Proposta por:** {player}"
+          - ""
+          - "**Data:** {date}"
+        thumbnail:
+          enabled: true
+          url: "{player_avatar_url}"
+        footer: "SimpleClans • Alianças"
+
+    ally-added:
+      enabled: true
+      webhook: "alerts"
+      priority: "MEDIUM"
+      use-player-avatar: false
+      embed:
+        title: "🤝 Aliança criada"
+        color: 5763719
+        description:
+          - "**Clã:** {clan} ({tag})"
+          - "**Clã aliado:** {clan2} ({tag2})"
+          - ""
+          - "**Data:** {date}"
+        thumbnail:
+          enabled: false
+          url: ""
+        footer: "SimpleClans • Alianças"
+
+    ally-removed:
+      enabled: true
+      webhook: "alerts"
+      priority: "MEDIUM"
+      use-player-avatar: false
+      embed:
+        title: "💔 Aliança desfeita"
+        color: 16705372
+        description:
+          - "**Clã:** {clan} ({tag})"
+          - "**Ex-aliado:** {clan2} ({tag2})"
+          - ""
+          - "**Data:** {date}"
+        thumbnail:
+          enabled: false
+          url: ""
+        footer: "SimpleClans • Alianças"
+
+    rival-added:
+      enabled: true
+      webhook: "alerts"
+      priority: "MEDIUM"
+      use-player-avatar: false
+      embed:
+        title: "⚔️ Rivalidade criada"
+        color: 15548997
+        description:
+          - "**Clã:** {clan} ({tag})"
+          - "**Rival:** {clan2} ({tag2})"
+          - ""
+          - "**Data:** {date}"
+        thumbnail:
+          enabled: false
+          url: ""
+        footer: "SimpleClans • Rivalidades"
+
+    rival-removed:
+      enabled: true
+      webhook: "alerts"
+      priority: "MEDIUM"
+      use-player-avatar: false
+      embed:
+        title: "🕊️ Rivalidade encerrada"
+        color: 5763719
+        description:
+          - "**Clã:** {clan} ({tag})"
+          - "**Ex-rival:** {clan2} ({tag2})"
+          - ""
+          - "**Data:** {date}"
+        thumbnail:
+          enabled: false
+          url: ""
+        footer: "SimpleClans • Rivalidades"
+
+    # ---------------- Guerras ---------------------------------------
+    war-started:
+      enabled: true
+      webhook: "alerts"
+      priority: "HIGH"
+      use-player-avatar: false
+      embed:
+        title: "🔥 Guerra iniciada"
+        color: 15548997
+        description:
+          - "**Clãs:** {clans}"
+          - "**Data:** {date}"
+        thumbnail:
+          enabled: false
+          url: ""
+        footer: "SimpleClans • Guerras"
+
+    war-ended:
+      enabled: true
+      webhook: "alerts"
+      priority: "MEDIUM"
+      use-player-avatar: false
+      embed:
+        title: "🏳️ Guerra encerrada"
+        color: 5763719
+        description:
+          - "**Clãs:** {clans}"
+          - "**Motivo:** {reason}"
+          - "**Data:** {date}"
+        thumbnail:
+          enabled: false
+          url: ""
+        footer: "SimpleClans • Guerras"
+
+    # ---------------- Ações administrativas -------------------------
+    staff-action:
+      enabled: true
+      webhook: "staff"
+      priority: "HIGH"
+      use-player-avatar: true
+      embed:
+        title: "🛠️ Ação Administrativa - SimpleClans"
+        color: 10181046
+        description:
+          - "**Staff:** {staff}"
+          - "**UUID do staff:** `{staff_uuid}`"
+          - ""
+          - "**Ação:** {action}"
+          - "**Clã:** {clan}"
+          - "**TAG:** {tag}"
+          - "**Jogador afetado:** {target}"
+          - "**Valor anterior:** {old_value}"
+          - "**Novo valor:** {new_value}"
+          - ""
+          - "**Servidor:** {server}"
+          - "**Data:** {date}"
+        thumbnail:
+          enabled: true
+          url: "{staff_avatar_url}"
+        footer: "SimpleClans • Auditoria administrativa"
+
+    # ---------------- Erros técnicos --------------------------------
+    technical-error:
+      enabled: true
+      webhook: "technical"
+      priority: "CRITICAL"
+      use-player-avatar: false
+      embed:
+        title: "🚨 Erro Técnico - SimpleClans"
+        color: 10038562
+        description:
+          - "**Contexto:** {context}"
+          - "**Detalhe:** `{detail}`"
+          - ""
+          - "**Servidor:** {server}"
+          - "**Data:** {date}"
+        thumbnail:
+          enabled: false
+          url: ""
+        footer: "SimpleClans • Erro técnico"

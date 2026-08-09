@@ -8,7 +8,6 @@ import net.sacredlabyrinth.phaed.simpleclans.commands.ClanPlayerInput;
 import net.sacredlabyrinth.phaed.simpleclans.conversation.ResignPrompt;
 import net.sacredlabyrinth.phaed.simpleclans.conversation.SCConversation;
 import net.sacredlabyrinth.phaed.simpleclans.events.TagChangeEvent;
-import net.sacredlabyrinth.phaed.simpleclans.hooks.discord.webhook.DiscordEmbed;
 import net.sacredlabyrinth.phaed.simpleclans.hooks.discord.webhook.DiscordWebhookService;
 import net.sacredlabyrinth.phaed.simpleclans.managers.*;
 import net.sacredlabyrinth.phaed.simpleclans.utils.ChatUtils;
@@ -363,16 +362,7 @@ public class ClanCommands extends BaseCommand {
 
         DiscordWebhookService webhookService = plugin.getDiscordWebhookService();
         if (webhookService != null) {
-            DiscordEmbed embed = DiscordEmbed.of("👢 Jogador expulso do clã", DiscordEmbed.COLOR_YELLOW)
-                    .field("Jogador", clanPlayer.getName())
-                    .field("UUID", clanPlayer.getUniqueId().toString())
-                    .field("Expulso por", sender.getName())
-                    .field("Clã", clan.getName())
-                    .field("TAG", clan.getTag().toUpperCase())
-                    .thumbnail(webhookService.getAvatarProvider()
-                            .avatarUrl(clanPlayer.getUniqueId(), clanPlayer.getName()))
-                    .footer("SimpleClans • Membros");
-            webhookService.alert("player-kicked", clanPlayer.getUniqueId(), embed);
+            webhookService.onPlayerKicked(sender, clanPlayer, clan);
         }
     }
 
