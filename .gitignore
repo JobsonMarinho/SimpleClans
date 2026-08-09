@@ -1,10 +1,20 @@
+# Gradle
+/.gradle/
+/build/
+
+# Legacy Maven (kept so old local output is ignored)
 /target/
+dependency-reduced-pom.xml
+
+# IDE
 /.idea/
 /bin/
 /.classpath
 /.project
-*.jar
 .settings
 .factorypath
 SimpleClans.iml
-dependency-reduced-pom.xml
+
+# Build artifacts — but keep the Gradle wrapper jar
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
