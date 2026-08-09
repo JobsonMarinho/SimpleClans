@@ -2,6 +2,7 @@ package net.sacredlabyrinth.phaed.simpleclans.managers;
 
 import net.sacredlabyrinth.phaed.simpleclans.*;
 import net.sacredlabyrinth.phaed.simpleclans.events.ClanBalanceUpdateEvent;
+import net.sacredlabyrinth.phaed.simpleclans.hooks.discord.webhook.DiscordWebhookService;
 import net.sacredlabyrinth.phaed.simpleclans.loggers.BankLogger;
 import net.sacredlabyrinth.phaed.simpleclans.loggers.BankOperator;
 import net.sacredlabyrinth.phaed.simpleclans.storage.DBCore;
@@ -24,6 +25,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.text.MessageFormat;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -42,8 +44,14 @@ public final class StorageManager {
     private final SimpleClans plugin;
     private DBCore core;
     private final HashMap<String, ChatBlock> chatBlocks = new HashMap<>();
-    private final Set<Clan> modifiedClans = new HashSet<>();
-    private final Set<ClanPlayer> modifiedClanPlayers = new HashSet<>();
+    // Identity-based buffers: Clan#equals compares tags and ClanPlayer#equals compares
+    // UUIDs, so in a regular HashSet a deleted clan and a new clan reusing the same tag
+    // would collide, making saveModified() write the dead clan's data over the new row.
+    // Synchronized because they are filled on the main thread and drained by SaveDataTask (async).
+    private final Set<Clan> modifiedClans =
+            Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>()));
+    private final Set<ClanPlayer> modifiedClanPlayers =
+            Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>()));
 
     /**
      *
@@ -152,6 +160,17 @@ public final class StorageManager {
                             + " PRIMARY KEY  (`kill_id`));";
                     core.execute(query);
                 }
+
+                if (!core.existsTable(getPrefixedTable("tag_reservations"))) {
+                    plugin.getLogger().info("Creating table: " + getPrefixedTable("tag_reservations"));
+
+                    String query = "CREATE TABLE IF NOT EXISTS `" + getPrefixedTable("tag_reservations") + "` ("
+                            + " `tag` varchar(25) NOT NULL,"
+                            + " `uuid` varchar(36) NOT NULL,"
+                            + " `expires_at` bigint NOT NULL,"
+                            + " PRIMARY KEY  (`tag`));";
+                    core.execute(query);
+                }
             } else {
                 plugin.getServer().getConsoleSender().sendMessage("[SimpleClans] " + ChatColor.RED + lang("mysql.connection.failed"));
             }
@@ -228,6 +247,17 @@ public final class StorageManager {
                             + " `kill_type` varchar(1) NOT NULL,"
                             + " `created_at` datetime NULL,"
                             + " PRIMARY KEY  (`kill_id`));";
+                    core.execute(query);
+                }
+
+                if (!core.existsTable(getPrefixedTable("tag_reservations"))) {
+                    plugin.getLogger().info("Creating table: " + getPrefixedTable("tag_reservations"));
+
+                    String query = "CREATE TABLE IF NOT EXISTS `" + getPrefixedTable("tag_reservations") + "` ("
+                            + " `tag` varchar(25) NOT NULL,"
+                            + " `uuid` varchar(36) NOT NULL,"
+                            + " `expires_at` bigint NOT NULL,"
+                            + " PRIMARY KEY  (`tag`));";
                     core.execute(query);
                 }
             } else {
@@ -366,10 +396,9 @@ public final class StorageManager {
         List<Clan> out = new ArrayList<>();
 
         String query = "SELECT * FROM `" + getPrefixedTable("clans") + "`;";
-        ResultSet res = core.select(query);
-
-        if (res != null) {
-            try {
+        try (Connection connection = core.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet res = statement.executeQuery(query)) {
                 while (res.next()) {
                     try {
                         boolean verified = res.getBoolean("verified");
@@ -427,7 +456,6 @@ public final class StorageManager {
                 plugin.getLogger().severe(String.format("An Error occurred: %s", ex.getErrorCode()));
                 plugin.getLogger().log(Level.SEVERE, null, ex);
             }
-        }
 
         return out;
     }
@@ -440,10 +468,9 @@ public final class StorageManager {
         Clan out = null;
 
         String query = "SELECT * FROM  `" + getPrefixedTable("clans") + "` WHERE `tag` = '" + tagClan + "';";
-        ResultSet res = core.select(query);
-
-        if (res != null) {
-            try {
+        try (Connection connection = core.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet res = statement.executeQuery(query)) {
                 while (res.next()) {
                     try {
                         boolean verified = res.getBoolean("verified");
@@ -501,7 +528,6 @@ public final class StorageManager {
                 plugin.getLogger().severe(String.format("An Error occurred: %s", ex.getErrorCode()));
                 plugin.getLogger().log(Level.SEVERE, null, ex);
             }
-        }
 
         return out;
     }
@@ -514,10 +540,9 @@ public final class StorageManager {
         List<ClanPlayer> out = new ArrayList<>();
 
         String query = "SELECT * FROM  `" + getPrefixedTable("players") + "`;";
-        ResultSet res = core.select(query);
-
-        if (res != null) {
-            try {
+        try (Connection connection = core.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet res = statement.executeQuery(query)) {
                 while (res.next()) {
                     try {
                         String uuid = res.getString("uuid");
@@ -579,7 +604,6 @@ public final class StorageManager {
                 plugin.getLogger().severe(String.format("An Error occurred: %s", ex.getErrorCode()));
                 plugin.getLogger().log(Level.SEVERE, null, ex);
             }
-        }
 
         return out;
     }
@@ -592,10 +616,9 @@ public final class StorageManager {
         ClanPlayer out = null;
 
         String query = "SELECT * FROM `" + getPrefixedTable("players") + "` WHERE `uuid` = '" + playerUniqueId.toString() + "';";
-        ResultSet res = core.select(query);
-
-        if (res != null) {
-            try {
+        try (Connection connection = core.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet res = statement.executeQuery(query)) {
                 while (res.next()) {
                     try {
                         String uuid = res.getString("uuid");
@@ -640,30 +663,39 @@ public final class StorageManager {
                         cp.setResignTimes(Helper.resignTimesFromJson(resign_times));
                         cp.setLocale(locale);
 
-                        if (!tag.isEmpty()) {
+                        if (tag != null && !tag.isEmpty()) {
                             Clan clanDB = retrieveOneClan(tag);
                             Clan clan = plugin.getClanManager().getClan(tag);
 
-                            if (clan != null && clanDB != null) {
-                                Clan clanReSync = SimpleClans.getInstance().getClanManager().getClan(tag);
-                                clanReSync.setFlags(clanDB.getFlags());
-                                clanReSync.setVerified(clanDB.isVerified());
-                                clanReSync.setFriendlyFire(clanDB.isFriendlyFire());
-                                clanReSync.setTag(clanDB.getTag());
-                                clanReSync.setColorTag(clanDB.getColorTag());
-                                clanReSync.setName(clanDB.getName());
-                                clanReSync.setPackedAllies(clanDB.getPackedAllies());
-                                clanReSync.setPackedRivals(clanDB.getPackedRivals());
-                                clanReSync.setPackedBb(clanDB.getPackedBb());
-                                clanReSync.setFounded(clanDB.getFounded());
-                                clanReSync.setLastUsed(clanDB.getLastUsed());
-                                clanReSync.setBalance(BankOperator.INTERNAL, ClanBalanceUpdateEvent.Cause.LOADING, BankLogger.Operation.SET, clanDB.getBalance());
-                                cp.setClan(clanReSync);
+                            if (clanDB == null) {
+                                // Clan is gone from the database (or the query failed); keep the in-memory one, if any
+                                if (clan != null) {
+                                    cp.setClan(clan);
+                                }
+                            } else if (clan != null) {
+                                // Refresh the cached clan from the database only when it has no
+                                // pending (unsaved) changes; otherwise the refresh would wipe
+                                // in-memory state such as a freshly accepted alliance that is
+                                // still waiting for the periodic save
+                                if (!isPendingSave(clan)) {
+                                    clan.setFlags(clanDB.getFlags());
+                                    clan.setVerified(clanDB.isVerified());
+                                    clan.setFriendlyFire(clanDB.isFriendlyFire());
+                                    clan.setTag(clanDB.getTag());
+                                    clan.setColorTag(clanDB.getColorTag());
+                                    clan.setName(clanDB.getName());
+                                    clan.setPackedAllies(clanDB.getPackedAllies());
+                                    clan.setPackedRivals(clanDB.getPackedRivals());
+                                    clan.setPackedBb(clanDB.getPackedBb());
+                                    clan.setFounded(clanDB.getFounded());
+                                    clan.setLastUsed(clanDB.getLastUsed());
+                                    clan.setBalance(BankOperator.INTERNAL, ClanBalanceUpdateEvent.Cause.LOADING, BankLogger.Operation.SET, clanDB.getBalance());
+                                }
+                                cp.setClan(clan);
                             } else {
                                 plugin.getClanManager().importClan(clanDB);
                                 clanDB.validateWarring();
-                                Clan newClan = plugin.getClanManager().getClan(clanDB.getTag());
-                                cp.setClan(newClan);
+                                cp.setClan(clanDB);
                             }
                         }
 
@@ -676,7 +708,6 @@ public final class StorageManager {
                 plugin.getLogger().severe(String.format("An Error occurred: %s", ex.getErrorCode()));
                 plugin.getLogger().log(Level.SEVERE, null, ex);
             }
-        }
 
         return out;
     }
@@ -742,6 +773,30 @@ public final class StorageManager {
             }
         } catch (SQLException ex) {
             plugin.getLogger().log(Level.SEVERE, "Error retrieving ClanPlayer by name: " + name, ex);
+        }
+        return null;
+    }
+
+    /**
+     * Retrieves a clan player from the database by UUID, without touching the
+     * in-memory cache (unlike {@link #retrieveOneClanPlayer(UUID)}, which refreshes
+     * and imports clans as a side effect). Safe to call from any thread.
+     *
+     * @param uuid the player UUID to search for
+     * @return the ClanPlayer if found, null otherwise
+     */
+    public @Nullable ClanPlayer retrieveClanPlayerByUniqueId(@NotNull UUID uuid) {
+        String query = "SELECT * FROM `" + getPrefixedTable("players") + "` WHERE `uuid` = ?;";
+        try (Connection connection = core.getConnection();
+             PreparedStatement ps = connection.prepareStatement(query)) {
+            ps.setString(1, uuid.toString());
+            try (ResultSet res = ps.executeQuery()) {
+                if (res.next()) {
+                    return buildClanPlayerFromResultSet(res);
+                }
+            }
+        } catch (SQLException ex) {
+            plugin.getLogger().log(Level.SEVERE, "Error retrieving ClanPlayer by uuid: " + uuid, ex);
         }
         return null;
     }
@@ -830,14 +885,26 @@ public final class StorageManager {
      */
     private void syncPlayerData(@NotNull String currentName, @NotNull UUID currentUuid) {
         try {
+            // Pure reads only: this runs async, so it must not mutate the cache
+            // (retrieveOneClanPlayer refreshes/imports clans as a side effect)
             ClanPlayer byName = retrieveClanPlayerByName(currentName);
-            ClanPlayer byUuid = retrieveOneClanPlayer(currentUuid);
+            ClanPlayer byUuid = retrieveClanPlayerByUniqueId(currentUuid);
 
             // Case 1: Found by name only, UUID differs - update UUID
             if (byName != null && byUuid == null) {
-                plugin.getLogger().warning(String.format("Correcting UUID for %s: %s → %s", byName.getName(), byName.getUniqueId(), currentUuid));
-
                 UUID oldUuid = byName.getUniqueId();
+
+                // Same UUID on both sides means the lookup by UUID failed (not a real mismatch);
+                // there is nothing to correct, just refresh the record
+                if (oldUuid == null || oldUuid.equals(currentUuid)) {
+                    byName.setUniqueId(currentUuid);
+                    byName.setName(currentName);
+                    byName.setLastSeen(System.currentTimeMillis());
+                    updateClanPlayer(byName, true);
+                    return;
+                }
+
+                plugin.getLogger().warning(String.format("Correcting UUID for %s: %s → %s", byName.getName(), oldUuid, currentUuid));
 
                 // Update UUID in database directly
                 String updateQuery = "UPDATE `" + getPrefixedTable("players") + "` SET `uuid` = ?, `name` = ?, `last_seen` = ? WHERE uuid = ?;";
@@ -850,13 +917,22 @@ public final class StorageManager {
                     ps.executeUpdate();
                 }
 
-                // Update in-memory references on the main thread
+                // Update in-memory references on the main thread, reusing the live
+                // cached object when there is one: replacing it with a snapshot built
+                // from the database would resurrect stale state (e.g. a clan the player
+                // already left while the change was still waiting for the periodic save)
                 Bukkit.getScheduler().runTask(plugin, () -> {
-                    byName.setUniqueId(currentUuid);
-                    byName.setName(currentName);
-                    byName.setLastSeen(System.currentTimeMillis());
+                    ClanPlayer live = plugin.getClanManager().getAnyClanPlayer(oldUuid);
                     plugin.getClanManager().deleteClanPlayerFromMemory(oldUuid);
-                    plugin.getClanManager().importClanPlayer(byName);
+                    ClanPlayer target = live != null ? live : byName;
+                    target.setUniqueId(currentUuid);
+                    target.setName(currentName);
+                    target.setLastSeen(System.currentTimeMillis());
+                    plugin.getClanManager().importClanPlayer(target);
+                    Clan clan = target.getClan();
+                    if (clan != null) {
+                        clan.importMember(target);
+                    }
                 });
 
                 plugin.getLogger().info(String.format("UUID corrected in database: %s", currentUuid));
@@ -875,7 +951,9 @@ public final class StorageManager {
             }
 
             // Case 3: Both found and they're the same record - just update
-            if (byName != null && byName.getUniqueId().equals(byUuid.getUniqueId())) {
+            // (Objects.equals: a legacy row can have a null uuid, which must fall
+            // through to the merge below instead of throwing)
+            if (byName != null && Objects.equals(byName.getUniqueId(), byUuid.getUniqueId())) {
                 byUuid.setName(currentName);
                 byUuid.setLastSeen(System.currentTimeMillis());
                 updateClanPlayer(byUuid, true);
@@ -894,16 +972,63 @@ public final class StorageManager {
                 merged.setName(currentName);
 
                 // Delete the record with wrong UUID only
-                String deleteByName = "DELETE FROM `" + getPrefixedTable("players") + "` WHERE uuid = '" + oldByNameUuid + "';";
-                core.executeUpdate(deleteByName);
+                if (oldByNameUuid != null) {
+                    String deleteByName = "DELETE FROM `" + getPrefixedTable("players") + "` WHERE uuid = '" + oldByNameUuid + "';";
+                    core.executeUpdate(deleteByName);
+                } else {
+                    // legacy row without a uuid - remove it by name
+                    String deleteByName = "DELETE FROM `" + getPrefixedTable("players") + "` WHERE `uuid` IS NULL AND `name` = ?;";
+                    try (Connection conn = core.getConnection();
+                         PreparedStatement ps = conn.prepareStatement(deleteByName)) {
+                        ps.setString(1, currentName);
+                        ps.executeUpdate();
+                    }
+                }
 
                 // Update the kept record with merged data
                 updateClanPlayer(merged, true);
 
-                // Update in-memory on the main thread
+                // Update in-memory on the main thread, reusing the live cached object:
+                // its state (current clan, changes waiting for the periodic save) is
+                // newer than the snapshot just read from the database
                 Bukkit.getScheduler().runTask(plugin, () -> {
-                    plugin.getClanManager().deleteClanPlayerFromMemory(oldByNameUuid);
-                    plugin.getClanManager().importClanPlayer(merged);
+                    ClanPlayer liveOld = oldByNameUuid == null ? null : plugin.getClanManager().getAnyClanPlayer(oldByNameUuid);
+                    if (oldByNameUuid != null) {
+                        plugin.getClanManager().deleteClanPlayerFromMemory(oldByNameUuid);
+                    }
+                    ClanPlayer liveCurrent = plugin.getClanManager().getAnyClanPlayer(currentUuid);
+                    ClanPlayer target = liveCurrent != null ? liveCurrent : liveOld;
+                    if (target == null) {
+                        plugin.getClanManager().importClanPlayer(merged);
+                        Clan mergedClan = merged.getClan();
+                        if (mergedClan != null) {
+                            mergedClan.importMember(merged);
+                        }
+                        return;
+                    }
+                    // detach the leftover duplicate from its clan's member list
+                    if (liveOld != null && liveOld != target) {
+                        Clan oldClan = liveOld.getClan();
+                        if (oldClan != null) {
+                            oldClan.removeMember(oldByNameUuid);
+                        }
+                    }
+                    target.setUniqueId(currentUuid);
+                    target.setName(currentName);
+                    // fold in the merged stats; max() so in-memory kills that were not
+                    // flushed to the database yet are never regressed
+                    target.setNeutralKills(Math.max(target.getNeutralKills(), merged.getNeutralKills()));
+                    target.setRivalKills(Math.max(target.getRivalKills(), merged.getRivalKills()));
+                    target.setCivilianKills(Math.max(target.getCivilianKills(), merged.getCivilianKills()));
+                    target.setAllyKills(Math.max(target.getAllyKills(), merged.getAllyKills()));
+                    target.setDeaths(Math.max(target.getDeaths(), merged.getDeaths()));
+                    plugin.getClanManager().importClanPlayer(target);
+                    Clan clan = target.getClan();
+                    if (clan != null) {
+                        clan.importMember(target);
+                    }
+                    // persist the memory-truth over the merged row
+                    updateClanPlayer(target);
                 });
 
                 plugin.getLogger().info(String.format("Duplicate records merged for %s (%s)", currentName, currentUuid));
@@ -977,6 +1102,13 @@ public final class StorageManager {
     }
 
     /**
+     * Whether the clan has buffered changes still waiting for the periodic save
+     */
+    public boolean isPendingSave(Clan clan) {
+        return modifiedClans.contains(clan);
+    }
+
+    /**
      * Update a clan to the database
      *
      * @param clan           clan to update
@@ -991,11 +1123,13 @@ public final class StorageManager {
             modifiedClans.add(clan);
             return;
         }
-        try (PreparedStatement st = prepareUpdateClanStatement(core.getConnection())) {
+        try (Connection connection = core.getConnection();
+             PreparedStatement st = prepareUpdateClanStatement(connection)) {
             setValues(st, clan);
             st.executeUpdate();
         } catch (SQLException ex) {
             plugin.getLogger().log(Level.SEVERE, String.format("Error updating Clan %s", clan.getTag()), ex);
+            DiscordWebhookService.technicalLog("Erro ao salvar clã " + clan.getTag(), ex.getMessage());
         }
     }
 
@@ -1029,9 +1163,249 @@ public final class StorageManager {
      * Delete a clan from the database
      */
     public void deleteClan(Clan clan) {
+        // drop any pending buffered update: it must not be written back after the delete
+        modifiedClans.remove(clan);
         plugin.getProxyManager().sendDelete(clan);
         String query = "DELETE FROM `" + getPrefixedTable("clans") + "` WHERE tag = '" + clan.getTag() + "';";
         core.executeUpdate(query);
+        // Safety net: clear the tag of every player row still pointing at the dead clan.
+        // Without this, members whose removal was never flushed would rejoin on restart -
+        // possibly into an unrelated future clan reusing the same tag.
+        String cleanupQuery = "UPDATE `" + getPrefixedTable("players") + "` SET `tag` = '', `leader` = 0, `join_date` = 0 WHERE `tag` = ?;";
+        try (Connection connection = core.getConnection();
+             PreparedStatement ps = connection.prepareStatement(cleanupQuery)) {
+            ps.setString(1, clan.getTag());
+            ps.executeUpdate();
+        } catch (SQLException ex) {
+            plugin.getLogger().log(Level.SEVERE, String.format("Error clearing member rows of deleted Clan %s", clan.getTag()), ex);
+            DiscordWebhookService.technicalLog("Erro ao limpar membros do clã deletado " + clan.getTag(), ex.getMessage());
+        }
+    }
+
+    /**
+     * Immutable snapshot of how another clan's stored references must look after a
+     * tag change (allies/rivals packed strings and the warring list inside flags)
+     */
+    public static final class TagReferenceUpdate {
+        private final Clan clan;
+        private final String packedAllies;
+        private final String packedRivals;
+        private final String flags;
+
+        TagReferenceUpdate(@NotNull Clan clan, @NotNull String packedAllies, @NotNull String packedRivals,
+                           @NotNull String flags) {
+            this.clan = clan;
+            this.packedAllies = packedAllies;
+            this.packedRivals = packedRivals;
+            this.flags = flags;
+        }
+
+        public @NotNull Clan getClan() {
+            return clan;
+        }
+
+        public @NotNull String getPackedAllies() {
+            return packedAllies;
+        }
+
+        public @NotNull String getPackedRivals() {
+            return packedRivals;
+        }
+
+        public @NotNull String getFlags() {
+            return flags;
+        }
+    }
+
+    /**
+     * Computes the reference update another clan needs after a tag rename, without
+     * mutating it. Returns null when the clan does not reference the old tag.
+     */
+    public @Nullable TagReferenceUpdate buildTagReferenceUpdate(@NotNull Clan other, @NotNull String oldTag,
+                                                                @NotNull String newTag) {
+        boolean ally = other.isAlly(oldTag);
+        boolean rival = other.isRival(oldTag);
+        boolean warring = other.isWarring(oldTag);
+        if (!ally && !rival && !warring) {
+            return null;
+        }
+        List<String> allies = new ArrayList<>(other.getAllies());
+        Collections.replaceAll(allies, oldTag, newTag);
+        List<String> rivals = new ArrayList<>(other.getRivals());
+        Collections.replaceAll(rivals, oldTag, newTag);
+        Flags flags = new Flags(other.getFlags());
+        if (warring) {
+            // "warring" is the same key Clan uses internally (Clan.WARRING_KEY)
+            List<String> warringList = flags.getStringList("warring");
+            Collections.replaceAll(warringList, oldTag, newTag);
+            flags.put("warring", warringList);
+        }
+        return new TagReferenceUpdate(other, String.join("|", allies), String.join("|", rivals),
+                flags.toJSONString());
+    }
+
+    /**
+     * Atomically renames a clan tag across every table that references it: the clan
+     * row itself, its members' rows and the allies/rivals/warring references stored
+     * by other clans. Either every statement commits or none does.
+     * <p>
+     * Blocking call - run it from an async thread. Memory must only be updated
+     * after this returns true.
+     * </p>
+     *
+     * @param oldTag           current clean tag
+     * @param newCleanTag      new clean tag
+     * @param newColorTag      new color tag (parsed colors)
+     * @param referenceUpdates precomputed updates for the clans referencing the old tag
+     * @return true if the transaction committed
+     */
+    public boolean changeClanTag(@NotNull String oldTag, @NotNull String newCleanTag, @NotNull String newColorTag,
+                                 @NotNull List<TagReferenceUpdate> referenceUpdates) {
+        try (Connection connection = core.getConnection()) {
+            if (connection == null) {
+                return false;
+            }
+            try {
+                connection.setAutoCommit(false);
+
+                try (PreparedStatement clanUpdate = connection.prepareStatement(
+                        "UPDATE `" + getPrefixedTable("clans") + "` SET `tag` = ?, `color_tag` = ? WHERE `tag` = ?;")) {
+                    clanUpdate.setString(1, newCleanTag);
+                    clanUpdate.setString(2, newColorTag);
+                    clanUpdate.setString(3, oldTag);
+                    if (clanUpdate.executeUpdate() != 1) {
+                        // clan row vanished (or tag already changed elsewhere) - abort
+                        connection.rollback();
+                        return false;
+                    }
+                }
+
+                try (PreparedStatement playersUpdate = connection.prepareStatement(
+                        "UPDATE `" + getPrefixedTable("players") + "` SET `tag` = ? WHERE `tag` = ?;")) {
+                    playersUpdate.setString(1, newCleanTag);
+                    playersUpdate.setString(2, oldTag);
+                    playersUpdate.executeUpdate();
+                }
+
+                if (!referenceUpdates.isEmpty()) {
+                    try (PreparedStatement refUpdate = connection.prepareStatement(
+                            "UPDATE `" + getPrefixedTable("clans")
+                                    + "` SET `packed_allies` = ?, `packed_rivals` = ?, `flags` = ? WHERE `tag` = ?;")) {
+                        for (TagReferenceUpdate update : referenceUpdates) {
+                            refUpdate.setString(1, update.getPackedAllies());
+                            refUpdate.setString(2, update.getPackedRivals());
+                            refUpdate.setString(3, update.getFlags());
+                            refUpdate.setString(4, update.getClan().getTag());
+                            refUpdate.addBatch();
+                        }
+                        refUpdate.executeBatch();
+                    }
+                }
+
+                // defensive: drop any stale reservation row for the new tag
+                try (PreparedStatement reservation = connection.prepareStatement(
+                        "DELETE FROM `" + getPrefixedTable("tag_reservations") + "` WHERE `tag` = ?;")) {
+                    reservation.setString(1, newCleanTag);
+                    reservation.executeUpdate();
+                }
+
+                connection.commit();
+                return true;
+            } catch (SQLException ex) {
+                try {
+                    connection.rollback();
+                } catch (SQLException suppressed) {
+                    ex.addSuppressed(suppressed);
+                }
+                plugin.getLogger().log(Level.SEVERE,
+                        String.format("Tag change transaction failed (%s -> %s), rolled back", oldTag, newCleanTag), ex);
+                DiscordWebhookService.technicalLog(
+                        String.format("Falha na transação de troca de TAG (%s -> %s), rollback executado", oldTag, newCleanTag),
+                        ex.getMessage());
+                return false;
+            } finally {
+                try {
+                    connection.setAutoCommit(true);
+                } catch (SQLException ignored) {
+                    // pool resets the connection state on return anyway
+                }
+            }
+        } catch (SQLException ex) {
+            plugin.getLogger().log(Level.SEVERE,
+                    String.format("Tag change transaction failed (%s -> %s)", oldTag, newCleanTag), ex);
+            return false;
+        }
+    }
+
+    /**
+     * Insert or replace a tag reservation in the database
+     *
+     * @param tag       the clean clan tag being reserved
+     * @param uuid      the player entitled to reuse the tag
+     * @param expiresAt epoch millis when the reservation expires
+     */
+    public void insertTagReservation(@NotNull String tag, @NotNull UUID uuid, long expiresAt) {
+        // delete-then-insert keeps the statement portable between MySQL and SQLite
+        String delete = "DELETE FROM `" + getPrefixedTable("tag_reservations") + "` WHERE `tag` = ?;";
+        String insert = "INSERT INTO `" + getPrefixedTable("tag_reservations") + "` (`tag`, `uuid`, `expires_at`) VALUES (?, ?, ?);";
+        try (Connection connection = core.getConnection();
+             PreparedStatement del = connection.prepareStatement(delete);
+             PreparedStatement ins = connection.prepareStatement(insert)) {
+            del.setString(1, tag);
+            del.executeUpdate();
+            ins.setString(1, tag);
+            ins.setString(2, uuid.toString());
+            ins.setLong(3, expiresAt);
+            ins.executeUpdate();
+        } catch (SQLException ex) {
+            plugin.getLogger().log(Level.SEVERE, String.format("Error saving tag reservation for %s", tag), ex);
+        }
+    }
+
+    /**
+     * Delete a tag reservation from the database
+     */
+    public void deleteTagReservation(@NotNull String tag) {
+        String query = "DELETE FROM `" + getPrefixedTable("tag_reservations") + "` WHERE `tag` = ?;";
+        try (Connection connection = core.getConnection();
+             PreparedStatement ps = connection.prepareStatement(query)) {
+            ps.setString(1, tag);
+            ps.executeUpdate();
+        } catch (SQLException ex) {
+            plugin.getLogger().log(Level.SEVERE, String.format("Error deleting tag reservation for %s", tag), ex);
+        }
+    }
+
+    /**
+     * Retrieves every non-expired tag reservation, purging the expired ones from
+     * the database in the same pass
+     *
+     * @return map of clean tag to reservation (uuid + expiration millis)
+     */
+    public @NotNull Map<String, Map.Entry<UUID, Long>> retrieveTagReservations() {
+        Map<String, Map.Entry<UUID, Long>> out = new HashMap<>();
+        long now = System.currentTimeMillis();
+        String purge = "DELETE FROM `" + getPrefixedTable("tag_reservations") + "` WHERE `expires_at` <= ?;";
+        String query = "SELECT `tag`, `uuid`, `expires_at` FROM `" + getPrefixedTable("tag_reservations") + "`;";
+        try (Connection connection = core.getConnection();
+             PreparedStatement ps = connection.prepareStatement(purge)) {
+            ps.setLong(1, now);
+            ps.executeUpdate();
+            try (Statement statement = connection.createStatement();
+                 ResultSet res = statement.executeQuery(query)) {
+                while (res.next()) {
+                    try {
+                        out.put(res.getString("tag"), new AbstractMap.SimpleImmutableEntry<>(
+                                UUID.fromString(res.getString("uuid")), res.getLong("expires_at")));
+                    } catch (IllegalArgumentException ignored) {
+                        // corrupt uuid, skip the row
+                    }
+                }
+            }
+        } catch (SQLException ex) {
+            plugin.getLogger().log(Level.SEVERE, "Error loading tag reservations", ex);
+        }
+        return out;
     }
 
     /**
@@ -1081,11 +1455,13 @@ public final class StorageManager {
             modifiedClanPlayers.add(cp);
             return;
         }
-        try (PreparedStatement st = prepareUpdateClanPlayerStatement(core.getConnection())) {
+        try (Connection connection = core.getConnection();
+             PreparedStatement st = prepareUpdateClanPlayerStatement(connection)) {
             setValues(st, cp);
             st.executeUpdate();
         } catch (SQLException ex) {
             plugin.getLogger().log(Level.SEVERE, String.format("Error updating ClanPlayer %s", cp.getName()), ex);
+            DiscordWebhookService.technicalLog("Erro ao salvar jogador " + cp.getName(), ex.getMessage());
         }
     }
 
@@ -1117,6 +1493,8 @@ public final class StorageManager {
      * Delete a clan player from the database
      */
     public void deleteClanPlayer(ClanPlayer cp) {
+        // drop any pending buffered update for this player
+        modifiedClanPlayers.remove(cp);
         final Clan clan = cp.getClan();
         if (clan != null) {
             clan.addBbWithoutSaving(MessageFormat.format(lang("has.been.purged"), cp.getName()));
@@ -1182,10 +1560,9 @@ public final class StorageManager {
         HashMap<String, Integer> out = new HashMap<>();
 
         String query = "SELECT victim, count(victim) AS kills FROM `" + getPrefixedTable("kills") + "` WHERE attacker = '" + playerName + "' GROUP BY victim ORDER BY count(victim) DESC;";
-        ResultSet res = core.select(query);
-
-        if (res != null) {
-            try {
+        try (Connection connection = core.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet res = statement.executeQuery(query)) {
                 while (res.next()) {
                     try {
                         String victim = res.getString("victim");
@@ -1201,7 +1578,6 @@ public final class StorageManager {
                 plugin.getLogger().severe(String.format("An Error occurred: %s", ex.getErrorCode()));
                 plugin.getLogger().log(Level.SEVERE, null, ex);
             }
-        }
 
         return out;
     }
@@ -1215,10 +1591,9 @@ public final class StorageManager {
         HashMap<String, Integer> out = new HashMap<>();
 
         String query = "SELECT attacker, victim, count(victim) AS kills FROM `" + getPrefixedTable("kills") + "` GROUP BY attacker, victim ORDER BY 3 DESC;";
-        ResultSet res = core.select(query);
-
-        if (res != null) {
-            try {
+        try (Connection connection = core.getConnection();
+             Statement statement = connection.createStatement();
+             ResultSet res = statement.executeQuery(query)) {
                 while (res.next()) {
                     try {
                         String attacker = res.getString("attacker");
@@ -1235,7 +1610,6 @@ public final class StorageManager {
                 plugin.getLogger().severe(String.format("An Error occurred: %s", ex.getErrorCode()));
                 plugin.getLogger().log(Level.SEVERE, null, ex);
             }
-        }
 
         return out;
     }
@@ -1487,31 +1861,56 @@ public final class StorageManager {
      * </p>
      */
     public void saveModified() {
-        try (PreparedStatement pst = prepareUpdateClanPlayerStatement(core.getConnection())) {
-            //removing purged players
-            modifiedClanPlayers.retainAll(plugin.getClanManager().getAllClanPlayers());
-            for (ClanPlayer cp : modifiedClanPlayers) {
-                setValues(pst, cp);
-                pst.addBatch();
-            }
-            pst.executeBatch();
-
+        List<ClanPlayer> playersToSave;
+        synchronized (modifiedClanPlayers) {
+            playersToSave = new ArrayList<>(modifiedClanPlayers);
             modifiedClanPlayers.clear();
-        } catch (SQLException ex) {
-            plugin.getLogger().log(Level.SEVERE, "Error saving modified ClanPlayers:", ex);
         }
-        try (PreparedStatement pst = prepareUpdateClanStatement(core.getConnection())) {
-            //removing disbanded clans
-            modifiedClans.retainAll(plugin.getClanManager().getClans());
-            for (Clan clan : modifiedClans) {
-                setValues(pst, clan);
-                pst.addBatch();
-            }
-            pst.executeBatch();
+        // removing purged players - by identity: a mere tag/uuid match is not enough,
+        // the buffered object must still be the one living in the cache, otherwise a
+        // stale instance (e.g. from a deleted clan) would be written over fresh data
+        Set<ClanPlayer> livePlayers = Collections.newSetFromMap(new IdentityHashMap<>());
+        livePlayers.addAll(plugin.getClanManager().getAllClanPlayers());
+        playersToSave.removeIf(cp -> !livePlayers.contains(cp));
 
+        if (!playersToSave.isEmpty()) {
+            try (Connection connection = core.getConnection();
+                 PreparedStatement pst = prepareUpdateClanPlayerStatement(connection)) {
+                for (ClanPlayer cp : playersToSave) {
+                    setValues(pst, cp);
+                    pst.addBatch();
+                }
+                pst.executeBatch();
+            } catch (SQLException ex) {
+                modifiedClanPlayers.addAll(playersToSave); // retry on the next cycle
+                plugin.getLogger().log(Level.SEVERE, "Error saving modified ClanPlayers:", ex);
+                DiscordWebhookService.technicalLog("Erro no salvamento periódico de jogadores", ex.getMessage());
+            }
+        }
+
+        List<Clan> clansToSave;
+        synchronized (modifiedClans) {
+            clansToSave = new ArrayList<>(modifiedClans);
             modifiedClans.clear();
-        } catch (SQLException ex) {
-            plugin.getLogger().log(Level.SEVERE, "Error saving modified Clans:", ex);
+        }
+        // removing disbanded clans - by identity, see above
+        Set<Clan> liveClans = Collections.newSetFromMap(new IdentityHashMap<>());
+        liveClans.addAll(plugin.getClanManager().getClans());
+        clansToSave.removeIf(clan -> !liveClans.contains(clan));
+
+        if (!clansToSave.isEmpty()) {
+            try (Connection connection = core.getConnection();
+                 PreparedStatement pst = prepareUpdateClanStatement(connection)) {
+                for (Clan clan : clansToSave) {
+                    setValues(pst, clan);
+                    pst.addBatch();
+                }
+                pst.executeBatch();
+            } catch (SQLException ex) {
+                modifiedClans.addAll(clansToSave); // retry on the next cycle
+                plugin.getLogger().log(Level.SEVERE, "Error saving modified Clans:", ex);
+                DiscordWebhookService.technicalLog("Erro no salvamento periódico de clãs", ex.getMessage());
+            }
         }
     }
 }

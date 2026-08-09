@@ -84,17 +84,22 @@ public class ClanPlayer implements Serializable, Comparable<ClanPlayer> {
 
     @Override
     public int hashCode() {
-        return getName().hashCode() >> 13;
+        // Identity is the UUID: names are mutable and can collide (e.g. a Java and
+        // a Bedrock player with the same name), which corrupted hash-based collections
+        return Objects.hashCode(uniqueId);
     }
 
     @Override
     public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
         if (!(obj instanceof ClanPlayer)) {
             return false;
         }
 
         ClanPlayer other = (ClanPlayer) obj;
-        return other.getName().equals(getName());
+        return uniqueId != null && uniqueId.equals(other.getUniqueId());
     }
 
     @Override

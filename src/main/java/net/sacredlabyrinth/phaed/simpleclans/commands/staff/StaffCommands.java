@@ -22,6 +22,8 @@ import org.bukkit.Location;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -77,6 +79,8 @@ public class StaffCommands extends BaseCommand {
         newClan.addBb(lang("joined.the.clan", cp.getName()));
         cm.serverAnnounce(lang("has.joined", cp.getName(), newClan.getName()));
         newClan.addPlayerToClan(cp);
+        plugin.getDiscordWebhookService().onStaffAction(sender, "Jogador movido para clã", newClan,
+                cp.getName(), null, newClan.getName());
     }
 
     @Subcommand("%mod %modtag")
@@ -104,9 +108,129 @@ public class StaffCommands extends BaseCommand {
             return;
         }
 
+        String oldColorTag = clan.getColorTag();
         clan.addBb(player.getName(), lang("tag.changed.to.0", ChatUtils.parseColors(tag)));
         clan.changeClanTag(tag);
         player.sendMessage(lang("0.tag.changed.to.1", player, clan.getTag(), tag));
+        plugin.getDiscordWebhookService().onStaffAction(player, "Cor/formato da TAG alterado", clan,
+                null, oldColorTag, tag);
+    }
+
+    @Subcommand("%admin %tag")
+    @CommandPermission("simpleclans.admin.tag")
+    @CommandCompletion("@clans @nothing")
+    @Description("{@@command.description.admin.tag}")
+    public void changeTag(Player player, @Name("clan") ClanInput clanInput, @Single @Name("tag") String newTag) {
+        Clan clan = clanInput.getClan();
+        String oldTag = clan.getTag();
+        String oldColorTag = clan.getColorTag();
+
+        TagChangeEvent event = new TagChangeEvent(player, clan, newTag);
+        Bukkit.getPluginManager().callEvent(event);
+        if (event.isCancelled()) {
+            return;
+        }
+        String inputTag = event.getNewTag();
+        String cleanNew = Helper.cleanTag(inputTag);
+
+        if (cleanNew.equals(oldTag)) {
+            // same clean tag: color/case changes belong to /clan mod modtag
+            ChatBlock.sendMessage(player, RED + lang("admin.tag.same.tag", player));
+            return;
+        }
+        Optional<String> validationError = plugin.getTagValidator().validate(player, inputTag);
+        if (validationError.isPresent()) {
+            ChatBlock.sendMessage(player, validationError.get());
+            return;
+        }
+        if (cm.isClan(cleanNew)) {
+            ChatBlock.sendMessage(player, RED + lang("clan.with.this.tag.already.exists", player));
+            return;
+        }
+        if (plugin.getTagReservationManager().isReservedForOther(cleanNew, null)) {
+            ChatBlock.sendMessage(player, RED + lang("tag.reservation.reserved", player));
+            return;
+        }
+        // lock the new tag so no concurrent creation/change can take it while the
+        // database transaction runs; creation paths check this same lock
+        if (!cm.lockTag(cleanNew)) {
+            ChatBlock.sendMessage(player, RED + lang("admin.tag.change.in.progress", player));
+            return;
+        }
+
+        // snapshot, on the main thread, of how every referencing clan must end up
+        List<StorageManager.TagReferenceUpdate> referenceUpdates = new ArrayList<>();
+        for (Clan other : cm.getClans()) {
+            if (other.getTag().equals(oldTag)) {
+                continue;
+            }
+            StorageManager.TagReferenceUpdate update = storage.buildTagReferenceUpdate(other, oldTag, cleanNew);
+            if (update != null) {
+                referenceUpdates.add(update);
+            }
+        }
+
+        String newColorTag = ChatUtils.parseColors(inputTag);
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            boolean success = storage.changeClanTag(oldTag, cleanNew, newColorTag, referenceUpdates);
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                try {
+                    if (!success) {
+                        ChatBlock.sendMessage(player, RED + lang("admin.tag.change.failed", player));
+                        return;
+                    }
+                    applyTagChangeInMemory(clan, oldTag, cleanNew, inputTag, referenceUpdates);
+                    ChatBlock.sendMessage(player, AQUA + lang("admin.tag.changed", player, clan.getName(),
+                            ChatUtils.stripColors(oldColorTag), ChatUtils.stripColors(newColorTag)));
+                    plugin.getDiscordWebhookService().onStaffTagChange(player, clan,
+                            ChatUtils.stripColors(oldColorTag), ChatUtils.stripColors(newColorTag));
+                } finally {
+                    cm.unlockTag(cleanNew);
+                }
+            });
+        });
+    }
+
+    private void applyTagChangeInMemory(Clan clan, String oldTag, String cleanNew, String inputTag,
+                                        List<StorageManager.TagReferenceUpdate> referenceUpdates) {
+        // let other servers drop the entry stored under the old tag before it changes
+        plugin.getProxyManager().sendDelete(clan);
+
+        cm.removeClan(oldTag);
+        clan.setTag(cleanNew);
+        clan.setColorTag(inputTag);
+        cm.importClan(clan);
+
+        // apply exactly the same reference values the transaction persisted
+        for (StorageManager.TagReferenceUpdate update : referenceUpdates) {
+            Clan other = update.getClan();
+            other.setPackedAllies(update.getPackedAllies());
+            other.setPackedRivals(update.getPackedRivals());
+            other.setFlags(update.getFlags());
+        }
+
+        // every cached member must point at the renamed clan (setClan refreshes cp.tag)
+        for (ClanPlayer cp : cm.getAllClanPlayers()) {
+            if (oldTag.equals(cp.getTag())) {
+                cp.setClan(clan);
+            }
+        }
+
+        // pending requests may reference the old tag as key or target - drop them
+        plugin.getRequestManager().removeRequest(oldTag);
+
+        // move clan-specific permissions to the new tag and reapply them
+        permissions.renameClanPermissions(oldTag, cleanNew);
+        permissions.updateClanPermissions(clan);
+
+        // refresh display names / chat tags of online members immediately
+        for (ClanPlayer cp : clan.getOnlineMembers()) {
+            cm.updateDisplayName(cp.toPlayer());
+        }
+
+        // re-buffer the clan so any state pending in the periodic save is written
+        // under the new tag, and broadcast the update to the proxy network
+        storage.updateClan(clan, false);
     }
 
     @Subcommand("%admin %reload")
@@ -123,9 +247,11 @@ public class StaffCommands extends BaseCommand {
         for (Clan clan : cm.getClans()) {
             permissions.updateClanPermissions(clan);
         }
+        plugin.getDiscordWebhookService().reload();
         Bukkit.getPluginManager().callEvent(new ReloadEvent(sender));
 
         ChatBlock.sendMessage(sender, AQUA + lang("configuration.reloaded", sender));
+        plugin.getDiscordWebhookService().onStaffAction(sender, "Configuração recarregada", null, null, null, null);
     }
 
     @Subcommand("%mod %home %set")
@@ -145,6 +271,8 @@ public class StaffCommands extends BaseCommand {
         clan.setHomeLocation(loc);
         ChatBlock.sendMessage(player, AQUA + lang("hombase.mod.set", player, clan.getName()) + " " +
                 ChatColor.YELLOW + Helper.toLocationString(loc));
+        plugin.getDiscordWebhookService().onStaffAction(player, "Base do clã definida (staff)", clan,
+                null, null, Helper.toLocationString(loc));
     }
 
     @Subcommand("%mod %home %tp")
@@ -173,6 +301,8 @@ public class StaffCommands extends BaseCommand {
         if (pl != null) {
             ChatBlock.sendMessage(pl, AQUA + lang("you.banned", sender));
         }
+        plugin.getDiscordWebhookService().onStaffAction(sender, "Jogador banido dos comandos de clã", null,
+                player.getClanPlayer().getName(), null, null);
     }
 
     @Subcommand("%mod %unban")
@@ -193,6 +323,8 @@ public class StaffCommands extends BaseCommand {
 
         settings.removeBanned(uuid);
         ChatBlock.sendMessage(sender, AQUA + lang("player.removed.from.the.banned.list", sender));
+        plugin.getDiscordWebhookService().onStaffAction(sender, "Jogador desbanido dos comandos de clã", null,
+                player.getClanPlayer().getName(), null, null);
     }
 
     @Subcommand("%mod %globalff %allow")
@@ -232,6 +364,7 @@ public class StaffCommands extends BaseCommand {
             clanInput.verifyClan();
             clanInput.addBb(sender.getName(), lang("clan.0.has.been.verified", clanInput.getName()));
             ChatBlock.sendMessage(sender, AQUA + lang("the.clan.has.been.verified", sender));
+            plugin.getDiscordWebhookService().onStaffAction(sender, "Clã verificado", clanInput, null, null, null);
         } else {
             ChatBlock.sendMessage(sender, RED + lang("the.clan.is.already.verified", sender));
         }
@@ -253,6 +386,8 @@ public class StaffCommands extends BaseCommand {
         }
         cm.deleteClanPlayer(player.getClanPlayer());
         ChatBlock.sendMessage(sender, AQUA + lang("player.purged", sender));
+        plugin.getDiscordWebhookService().onStaffAction(sender, "Dados de jogador purgados", clan,
+                player.getClanPlayer().getName(), null, null);
     }
 
     @Subcommand("%mod %kick")
@@ -270,6 +405,8 @@ public class StaffCommands extends BaseCommand {
         clan.addBb(sender.getName(), lang("has.been.kicked.by", clanPlayer.getName(),
                 sender.getName(), sender));
         clan.removePlayerFromClan(clanPlayer.getUniqueId());
+        plugin.getDiscordWebhookService().onStaffAction(sender, "Jogador expulso do clã (staff)", clan,
+                clanPlayer.getName(), null, null);
     }
 
     @Subcommand("%mod %disband")
@@ -301,6 +438,8 @@ public class StaffCommands extends BaseCommand {
         clan.addBb(sender.getName(), lang("promoted.to.leader", promotePl.getName()));
         clan.promote(promotePl.getUniqueId());
         ChatBlock.sendMessage(sender, AQUA + lang("player.successfully.promoted", sender));
+        plugin.getDiscordWebhookService().onStaffAction(sender, "Jogador promovido a líder (staff)", clan,
+                promotePl.getName(), null, null);
     }
 
     @Subcommand("%admin %demote")
@@ -323,6 +462,8 @@ public class StaffCommands extends BaseCommand {
         clan.demote(otherCp.getUniqueId());
         clan.addBb(sender.getName(), lang("demoted.back.to.member", otherCp.getName()));
         ChatBlock.sendMessage(sender, AQUA + lang("player.successfully.demoted", sender));
+        plugin.getDiscordWebhookService().onStaffAction(sender, "Líder rebaixado a membro (staff)", clan,
+                otherCp.getName(), null, null);
     }
 
     @Subcommand("%admin %resetkdr %everyone")
@@ -337,6 +478,8 @@ public class StaffCommands extends BaseCommand {
             }
         }
         ChatBlock.sendMessage(sender, RED + lang("you.have.reseted.kdr.of.all.players", sender));
+        plugin.getDiscordWebhookService().onStaffAction(sender, "KDR de todos os jogadores resetado", null,
+                null, null, null);
     }
 
     @Subcommand("%admin %resetkdr")
@@ -350,6 +493,8 @@ public class StaffCommands extends BaseCommand {
         if (!event.isCancelled()) {
             cm.resetKdr(cp);
             ChatBlock.sendMessage(sender, RED + lang("you.have.reseted.0.kdr", sender, cp.getName()));
+            plugin.getDiscordWebhookService().onStaffAction(sender, "KDR de jogador resetado", cp.getClan(),
+                    cp.getName(), null, null);
         }
     }
 
@@ -363,6 +508,8 @@ public class StaffCommands extends BaseCommand {
         clan.setPermanent(permanent);
         clan.addBb(sender.getName(), lang((permanent) ? "permanent.status.enabled" : "permanent.status.disabled", sender.getName()));
         ChatBlock.sendMessage(sender, AQUA + lang("you.have.toggled.permanent.status", sender, clan.getName()));
+        plugin.getDiscordWebhookService().onStaffAction(sender, "Status permanente alterado", clan,
+                null, String.valueOf(!permanent), String.valueOf(permanent));
     }
 
     @Subcommand("%mod %rename")
@@ -371,10 +518,13 @@ public class StaffCommands extends BaseCommand {
     @Description("{@@command.description.mod.rename}")
     public void rename(CommandSender sender, @Name("clan") ClanInput clanInput, @Name("name") String clanName) {
         Clan clan = clanInput.getClan();
+        String oldName = clan.getName();
         clan.setName(clanName);
         storage.updateClan(clan);
 
         ChatBlock.sendMessageKey(sender, "you.have.successfully.renamed.the.clan", clanName);
+        plugin.getDiscordWebhookService().onStaffAction(sender, "Nome do clã alterado (staff)", clan,
+                null, oldName, clanName);
     }
 
     @Subcommand("%mod %locale")

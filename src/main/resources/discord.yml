@@ -1,0 +1,84 @@
+# ============================================================
+#  SimpleClans - Webhooks do Discord
+# ============================================================
+#  Logs de atividade dos clãs enviados como embeds para o Discord.
+#
+#  Categorias:
+#    alerts    -> atividade normal dos clãs (criação, membros, alianças...)
+#    staff     -> auditoria de comandos administrativos
+#    technical -> erros técnicos (banco de dados, falhas de operação)
+#
+#  Cada categoria usa uma webhook URL própria. Crie a webhook no canal
+#  desejado do Discord (Configurações do canal > Integrações > Webhooks)
+#  e cole a URL abaixo.
+#
+#  O envio é 100% assíncrono, com fila, anti-flood e respeito ao rate
+#  limit do Discord. Se o Discord estiver fora do ar, nada no plugin
+#  é afetado.
+# ============================================================
+discord:
+  enabled: false
+  # Nome exibido como autor das mensagens
+  username: "SimpleClans"
+
+  webhooks:
+    alerts:
+      enabled: true
+      url: ""
+    staff:
+      enabled: true
+      url: ""
+    technical:
+      enabled: true
+      url: ""
+
+  settings:
+    # Timeout das requisições HTTP (ms)
+    timeout-ms: 5000
+    # Novas tentativas em falhas temporárias (5xx / erro de rede)
+    max-retries: 2
+    # Intervalo mínimo entre envios por webhook (o Discord aceita ~30 req/min
+    # por webhook; 2000ms mantém uma folga segura)
+    min-send-interval-ms: 2000
+
+  anti-flood:
+    # Tamanho máximo da fila; cheia = mensagens novas são descartadas
+    queue-max-size: 100
+    # De quanto em quanto tempo a fila é drenada (segundos)
+    flush-interval-seconds: 3
+    # Cooldown global por tipo de evento (segundos; 0 = desligado)
+    per-event-cooldown-seconds: 2
+    # Cooldown por (evento, jogador) (segundos; 0 = desligado)
+    per-player-cooldown-seconds: 5
+    # Eventos críticos (staff/technical) ignoram o anti-flood
+    ignore-for-critical: true
+    # Janela de deduplicação de erros técnicos repetidos (segundos)
+    technical-dedupe-seconds: 300
+
+  # Liga/desliga cada tipo de evento. Eventos não listados ficam ligados.
+  # Observação: uma expulsão também gera "player-left" (a saída em si);
+  # desligue um dos dois se preferir apenas um registro.
+  events:
+    clan-created: true
+    clan-disbanded: true
+    player-joined: true
+    player-left: true
+    player-kicked: true
+    invite-sent: true
+    invite-accepted: true
+    invite-denied: true
+    ally-requested: true
+    ally-added: true
+    ally-removed: true
+    rival-added: true
+    rival-removed: true
+    promote: true
+    demote: true
+    tag-changed: true
+    name-changed: true
+    home-set: true
+    war-started: true
+    war-ended: true
+    verify: true
+    staff-action: true
+    technical-error: true

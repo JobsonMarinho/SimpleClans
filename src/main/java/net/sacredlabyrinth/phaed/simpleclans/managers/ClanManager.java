@@ -43,6 +43,9 @@ public final class ClanManager {
     private final SimpleClans plugin;
     private final ConcurrentHashMap<String, Clan> clans = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, ClanPlayer> clanPlayers = new ConcurrentHashMap<>();
+    // tags momentarily locked by multi-step operations (e.g. an admin tag change
+    // running its database transaction) so a concurrent creation cannot take them
+    private final Set<String> lockedTags = ConcurrentHashMap.newKeySet();
     private final HashMap<ClanPlayer, List<Kill>> kills = new HashMap<>();
 
     /**
@@ -198,6 +201,27 @@ public final class ClanManager {
      */
     public boolean isClan(String tag) {
         return clans.containsKey(Helper.cleanTag(tag));
+    }
+
+    /**
+     * Locks a tag for a multi-step operation. Returns false if it is already locked.
+     */
+    public boolean lockTag(@NotNull String cleanTag) {
+        return lockedTags.add(cleanTag);
+    }
+
+    /**
+     * Releases a tag locked with {@link #lockTag(String)}
+     */
+    public void unlockTag(@NotNull String cleanTag) {
+        lockedTags.remove(cleanTag);
+    }
+
+    /**
+     * Whether the tag is locked by an ongoing multi-step operation
+     */
+    public boolean isTagLocked(@NotNull String cleanTag) {
+        return lockedTags.contains(cleanTag);
     }
 
     /**

@@ -1,10 +1,11 @@
 package net.sacredlabyrinth.phaed.simpleclans.storage;
 
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
 import net.sacredlabyrinth.phaed.simpleclans.SimpleClans;
 
 import java.io.File;
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.logging.Logger;
 
@@ -13,10 +14,9 @@ import java.util.logging.Logger;
  */
 public class SQLiteCore implements DBCore {
     private final Logger log;
-    private Connection connection;
     private final String dbLocation;
     private final String dbName;
-    private File file;
+    private HikariDataSource dataSource;
 
     /**
      * @param dbLocation the dbLocation to set
@@ -29,46 +29,47 @@ public class SQLiteCore implements DBCore {
     }
 
     private void initialize() {
-        if (file == null) {
-            File dbFolder = new File(dbLocation);
+        File dbFolder = new File(dbLocation);
 
-            if (!dbFolder.exists() && !dbFolder.mkdir()) {
-                log.severe("Failed to create database folder!");
-                return;
-            }
-
-            file = new File(dbFolder.getAbsolutePath() + File.separator + dbName + ".db");
+        if (!dbFolder.exists() && !dbFolder.mkdir()) {
+            log.severe("Failed to create database folder!");
+            return;
         }
 
+        File file = new File(dbFolder.getAbsolutePath() + File.separator + dbName + ".db");
+
         try {
-            Class.forName("org.sqlite.JDBC");
-
-            connection = DriverManager.getConnection("jdbc:sqlite:" + file.getAbsolutePath());
-
-        } catch (SQLException ex) {
+            HikariConfig config = new HikariConfig();
+            config.setPoolName("SimpleClans-SQLite");
+            config.setDriverClassName("org.sqlite.JDBC");
+            config.setJdbcUrl("jdbc:sqlite:" + file.getAbsolutePath());
+            // SQLite supports a single writer; keep one connection to avoid "database is locked"
+            config.setMaximumPoolSize(1);
+            config.setConnectionTimeout(10000);
+            config.setMaxLifetime(0);
+            dataSource = new HikariDataSource(config);
+        } catch (Exception ex) {
             log.severe("SQLite exception on initialize " + ex);
-        } catch (ClassNotFoundException ex) {
-            log.severe("You need the SQLite library " + ex);
         }
     }
 
     @Override
     public Connection getConnection() {
-        if (connection == null) {
-            initialize();
+        if (dataSource == null) {
+            return null;
         }
-
-        return connection;
+        try {
+            return dataSource.getConnection();
+        } catch (SQLException e) {
+            log.severe("Failed to obtain a connection from the pool! " + e.getMessage());
+            return null;
+        }
     }
 
     @Override
     public void close() {
-        try {
-            if (connection != null) {
-                connection.close();
-            }
-        } catch (Exception e) {
-            log.severe("Failed to close database connection! " + e.getMessage());
+        if (dataSource != null && !dataSource.isClosed()) {
+            dataSource.close();
         }
     }
 

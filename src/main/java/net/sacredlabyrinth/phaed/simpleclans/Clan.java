@@ -9,6 +9,7 @@ import net.sacredlabyrinth.phaed.simpleclans.loggers.BankLog;
 import net.sacredlabyrinth.phaed.simpleclans.loggers.BankLogger;
 import net.sacredlabyrinth.phaed.simpleclans.loggers.BankOperator;
 import net.sacredlabyrinth.phaed.simpleclans.managers.SettingsManager;
+import net.sacredlabyrinth.phaed.simpleclans.managers.TagReservationManager;
 import net.sacredlabyrinth.phaed.simpleclans.utils.ChatUtils;
 import net.sacredlabyrinth.phaed.simpleclans.utils.CurrencyFormat;
 import net.sacredlabyrinth.phaed.simpleclans.utils.DateFormat;
@@ -1397,6 +1398,12 @@ public class Clan implements Serializable, Comparable<Clan> {
             return;
         }
 
+        // Tag reservation eligibility must be decided before any state is mutated:
+        // only a member deleting their own clan earns the reservation (staff
+        // disbands and purges do not create one)
+        UUID reservationOwner = sender instanceof Player && isMember(((Player) sender).getUniqueId())
+                ? ((Player) sender).getUniqueId() : null;
+
         if (announce) {
             if (SimpleClans.getInstance().getSettingsManager().is(DISABLE_MESSAGES) && sender != null) {
                 clanAnnounce(sender.getName(), AQUA + lang("clan.has.been.disbanded", getName()));
@@ -1416,6 +1423,8 @@ public class Clan implements Serializable, Comparable<Clan> {
                 }
 
                 cp.setLeader(false);
+                // persist the removal, otherwise a restart would resurrect the membership
+                SimpleClans.getInstance().getStorageManager().updateClanPlayer(cp);
             }
         }
 
@@ -1430,20 +1439,32 @@ public class Clan implements Serializable, Comparable<Clan> {
             }
 
             if (c.removeRival(getTag())) {
+                // removeRival/removeAlly only mutate memory; persist explicitly because
+                // the addBb below does not save anything for unverified clans
+                SimpleClans.getInstance().getStorageManager().updateClan(c, false);
                 c.addBb(disbanded, lang("has.been.disbanded.rivalry.ended", getName()));
             }
 
             if (c.removeAlly(getTag())) {
+                SimpleClans.getInstance().getStorageManager().updateClan(c, false);
                 c.addBb(disbanded, lang("has.been.disbanded.alliance.ended", getName()));
             }
         }
 
         SimpleClans.getInstance().getRequestManager().removeRequest(getTag());
 
-        SimpleClans.getInstance().getServer().getScheduler().scheduleSyncDelayedTask(SimpleClans.getInstance(), () -> {
-            SimpleClans.getInstance().getClanManager().removeClan(getTag());
-            SimpleClans.getInstance().getStorageManager().deleteClan(this);
-        }, 1);
+        // Remove synchronously: the 1-tick delay previously used here left a window
+        // where the disbanded clan was still visible in the cache and could be picked
+        // up by lookups or written back by the periodic save task
+        SimpleClans.getInstance().getClanManager().removeClan(getTag());
+        SimpleClans.getInstance().getStorageManager().deleteClan(this);
+
+        TagReservationManager reservations = SimpleClans.getInstance().getTagReservationManager();
+        if (reservationOwner != null && reservations != null && reservations.isEnabled()) {
+            reservations.reserve(getTag(), reservationOwner);
+            ChatBlock.sendMessage(sender, AQUA + lang("tag.reservation.created", sender,
+                    ChatUtils.stripColors(getColorTag()), reservations.getDurationMinutes()));
+        }
     }
 
     public void disband() {

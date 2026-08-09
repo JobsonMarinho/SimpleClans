@@ -84,6 +84,23 @@ public final class PermissionsManager {
     }
 
     /**
+     * Moves the clan-specific permission entry from one tag to another, both in
+     * memory and in the config section, keeping custom permissions after a tag change
+     */
+    public void renameClanPermissions(@NotNull String oldTag, @NotNull String newTag) {
+        List<String> clanPermissions = permissions.remove(oldTag);
+        if (clanPermissions != null) {
+            permissions.put(newTag, clanPermissions);
+        }
+        SettingsManager settingsManager = SimpleClans.getInstance().getSettingsManager();
+        Object configured = settingsManager.getConfig().get("permissions." + oldTag);
+        if (configured != null) {
+            settingsManager.getConfig().set("permissions." + newTag, configured);
+            settingsManager.getConfig().set("permissions." + oldTag, null);
+        }
+    }
+
+    /**
      * Adds all permissions for a clan
      */
     public void updateClanPermissions(Clan clan) {

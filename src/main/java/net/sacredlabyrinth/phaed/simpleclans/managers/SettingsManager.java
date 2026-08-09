@@ -330,6 +330,8 @@ public final class SettingsManager {
         TAG_SEPARATOR_COLOR("tag.separator.color", "8"),
         TAG_SEPARATOR_LEADER_COLOR("tag.separator.leader-color", "4"),
         TAG_SEPARATOR_CHAR("tag.separator.char", " ."),
+        TAG_RESERVATION_ENABLED("tag.reservation.enabled", true),
+        TAG_RESERVATION_DURATION_MINUTES("tag.reservation.duration-minutes", 15),
         @Deprecated
         TAG_SEPARATOR_char("tag.separator.char", " ."),
         /*

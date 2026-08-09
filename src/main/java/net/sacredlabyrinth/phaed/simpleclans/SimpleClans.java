@@ -2,6 +2,8 @@ package net.sacredlabyrinth.phaed.simpleclans;
 
 import co.aikar.commands.BukkitCommandIssuer;
 import net.sacredlabyrinth.phaed.simpleclans.commands.SCCommandManager;
+import net.sacredlabyrinth.phaed.simpleclans.hooks.discord.webhook.DiscordWebhookListener;
+import net.sacredlabyrinth.phaed.simpleclans.hooks.discord.webhook.DiscordWebhookService;
 import net.sacredlabyrinth.phaed.simpleclans.hooks.papi.SimpleClansExpansion;
 import net.sacredlabyrinth.phaed.simpleclans.language.LanguageResource;
 import net.sacredlabyrinth.phaed.simpleclans.listeners.*;
@@ -65,6 +67,8 @@ public class SimpleClans extends JavaPlugin {
 
     private BankLogger bankLogger;
     private TagValidator tagValidator;
+    private TagReservationManager tagReservationManager;
+    private DiscordWebhookService discordWebhookService;
 
     /**
      * @return the logger
@@ -112,10 +116,13 @@ public class SimpleClans extends JavaPlugin {
         clanManager = new ClanManager();
         proxyManager = new BungeeManager(this);
         storageManager = new StorageManager();
+        tagReservationManager = new TagReservationManager(this);
         teleportManager = new TeleportManager();
         protectionManager = new ProtectionManager();
         protectionManager.registerListeners();
         chatManager = new ChatManager(this);
+        discordWebhookService = new DiscordWebhookService(this);
+        discordWebhookService.start();
         registerEvents();
         permissionsManager.loadPermissions();
         commandManager = new SCCommandManager(this);
@@ -146,6 +153,7 @@ public class SimpleClans extends JavaPlugin {
         pm.registerEvents(new TamableMobsSharing(this), this);
         pm.registerEvents(new PvPOnlyInWar(this), this);
         pm.registerEvents(new FriendlyFire(this), this);
+        pm.registerEvents(new DiscordWebhookListener(this), this);
     }
 
     private void hookIntoPAPI() {
@@ -200,6 +208,9 @@ public class SimpleClans extends JavaPlugin {
     public void onDisable() {
         if (getSettingsManager().is(PERFORMANCE_SAVE_PERIODICALLY)) {
             getStorageManager().saveModified();
+        }
+        if (discordWebhookService != null) {
+            discordWebhookService.shutdown();
         }
         getStorageManager().closeConnection();
         getPermissionsManager().savePermissions();
@@ -359,5 +370,13 @@ public class SimpleClans extends JavaPlugin {
 
     public TagValidator getTagValidator() {
         return tagValidator;
+    }
+
+    public TagReservationManager getTagReservationManager() {
+        return tagReservationManager;
+    }
+
+    public DiscordWebhookService getDiscordWebhookService() {
+        return discordWebhookService;
     }
 }

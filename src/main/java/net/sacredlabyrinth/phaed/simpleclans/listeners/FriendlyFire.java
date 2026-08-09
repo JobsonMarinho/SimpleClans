@@ -70,7 +70,10 @@ public class FriendlyFire extends SCListener {
             return;
         }
 
-        if (victimClan.isAlly(attackerClan.getTag())) {
+        // Check both sides: the alliance is bidirectional, but the two lists can
+        // momentarily diverge (e.g. one clan refreshed from the database before a
+        // pending save was flushed); either side registering it must block the hit
+        if (victimClan.isAlly(attackerClan.getTag()) || attackerClan.isAlly(victimClan.getTag())) {
             warn(attacker, "cannot.attack.ally");
             event.setCancelled(true);
         }

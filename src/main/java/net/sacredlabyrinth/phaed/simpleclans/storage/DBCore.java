@@ -3,11 +3,11 @@ package net.sacredlabyrinth.phaed.simpleclans.storage;
 import net.sacredlabyrinth.phaed.simpleclans.SimpleClans;
 import net.sacredlabyrinth.phaed.simpleclans.managers.SettingsManager.ConfigField;
 import org.bukkit.Bukkit;
-import org.jetbrains.annotations.Nullable;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -20,36 +20,28 @@ public interface DBCore {
     Logger log = plugin.getLogger();
 
     /**
-     * @return connection
+     * Borrows a connection from the pool. The caller is responsible for closing
+     * it (e.g. via try-with-resources), which returns it to the pool.
+     *
+     * @return a pooled connection, or null if none could be obtained
      */
     Connection getConnection();
 
     /**
-     * @return whether connection can be established
+     * @return whether a connection can be established
      */
     default boolean checkConnection() {
-        return getConnection() != null;
+        try (Connection connection = getConnection()) {
+            return connection != null;
+        } catch (SQLException ex) {
+            return false;
+        }
     }
 
     /**
-     * Close connection
+     * Close the underlying connection pool
      */
     void close();
-
-    /**
-     * Execute a select statement
-     * @param query the query
-     * @return the result set or null if the query failed
-     */
-    default @Nullable ResultSet select(String query) {
-        Connection connection = getConnection();
-        try {
-            return connection.createStatement().executeQuery(query);
-        } catch (SQLException ex) {
-            log.log(Level.SEVERE, String.format("Error executing query: %s", query), ex);
-        }
-        return null;
-    }
 
     /**
      * Execute a statement
@@ -57,7 +49,12 @@ public interface DBCore {
      * @return true if the statement was executed
      */
     default boolean execute(String query) {
-        try (java.sql.Statement statement = getConnection().createStatement()) {
+        Connection connection = getConnection();
+        if (connection == null) {
+            return false;
+        }
+        try (Connection conn = connection;
+             Statement statement = conn.createStatement()) {
             statement.execute(query);
             return true;
         } catch (SQLException ex) {
@@ -72,7 +69,12 @@ public interface DBCore {
      * @return true if the table exists
      */
     default boolean existsTable(String table) {
-        try (ResultSet tables = getConnection().getMetaData().getTables(null, null, table, null)) {
+        Connection connection = getConnection();
+        if (connection == null) {
+            return false;
+        }
+        try (Connection conn = connection;
+             ResultSet tables = conn.getMetaData().getTables(null, null, table, null)) {
             return tables.next();
         } catch (SQLException ex) {
             log.log(Level.SEVERE, String.format("Error checking if table %s exists", table), ex);
@@ -88,7 +90,12 @@ public interface DBCore {
      * @return true if the column exists
      */
     default boolean existsColumn(String table, String column) {
-        try (ResultSet col = getConnection().getMetaData().getColumns(null, null, table, column)) {
+        Connection connection = getConnection();
+        if (connection == null) {
+            return false;
+        }
+        try (Connection conn = connection;
+             ResultSet col = conn.getMetaData().getColumns(null, null, table, column)) {
             return col.next();
         } catch (Exception ex) {
             log.log(Level.SEVERE, String.format("Error checking if column %s exists in table %s", column, table), ex);
@@ -100,14 +107,16 @@ public interface DBCore {
         final Exception exception = new Exception(); // Stores a reference to the caller's stack trace for async tasks
         Runnable executeUpdate = () -> {
             Connection connection = getConnection();
-            if (connection != null) {
-                try (java.sql.Statement statement = connection.createStatement()) {
-                    statement.executeUpdate(query);
-                } catch (SQLException ex) {
-                    log.log(Level.SEVERE, String.format("Error executing query: %s", query), ex);
-                    if (!Bukkit.isPrimaryThread()) {
-                        log.log(Level.SEVERE, "Caller's stack trace:", exception);
-                    }
+            if (connection == null) {
+                return;
+            }
+            try (Connection conn = connection;
+                 Statement statement = conn.createStatement()) {
+                statement.executeUpdate(query);
+            } catch (SQLException ex) {
+                log.log(Level.SEVERE, String.format("Error executing query: %s", query), ex);
+                if (!Bukkit.isPrimaryThread()) {
+                    log.log(Level.SEVERE, "Caller's stack trace:", exception);
                 }
             }
         };

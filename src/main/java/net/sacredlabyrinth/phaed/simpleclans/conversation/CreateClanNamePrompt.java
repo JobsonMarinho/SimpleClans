@@ -2,6 +2,7 @@ package net.sacredlabyrinth.phaed.simpleclans.conversation;
 
 import net.sacredlabyrinth.phaed.simpleclans.ChatBlock;
 import net.sacredlabyrinth.phaed.simpleclans.Clan;
+import net.sacredlabyrinth.phaed.simpleclans.Helper;
 import net.sacredlabyrinth.phaed.simpleclans.SimpleClans;
 import net.sacredlabyrinth.phaed.simpleclans.events.PreCreateClanEvent;
 import net.sacredlabyrinth.phaed.simpleclans.managers.SettingsManager;
@@ -64,7 +65,20 @@ public class CreateClanNamePrompt extends StringPrompt {
 
     private void processClanCreation(@NotNull SimpleClans plugin, @NotNull Player player, @NotNull String tag,
                                      @NotNull String name) {
+        String cleanTag = Helper.cleanTag(tag);
+        // Re-validate at confirmation time: another player may have created, locked
+        // or reserved this tag while the conversation was still open
+        if (plugin.getClanManager().isClan(cleanTag) || plugin.getClanManager().isTagLocked(cleanTag)) {
+            ChatBlock.sendMessage(player, RED + lang("clan.with.this.tag.already.exists", player));
+            return;
+        }
+        if (plugin.getTagReservationManager().isReservedForOther(cleanTag, player.getUniqueId())) {
+            ChatBlock.sendMessage(player, RED + lang("tag.reservation.reserved", player));
+            return;
+        }
         if (plugin.getClanManager().purchaseCreation(player)) {
+            // the former owner recreating the clan consumes their reservation
+            plugin.getTagReservationManager().consumeIfOwner(cleanTag, player.getUniqueId());
             plugin.getClanManager().createClan(player, tag, name);
 
             Clan clan = plugin.getClanManager().getClan(tag);
