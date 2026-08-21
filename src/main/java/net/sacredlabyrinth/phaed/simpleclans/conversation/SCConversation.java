@@ -16,6 +16,12 @@ import java.util.UUID;
 public class SCConversation extends Conversation {
     private static final Map<UUID, SCConversation> conversations = new HashMap<>();
 
+    /**
+     * Guardado aqui porque {@code Conversation#firstPrompt} e privado: o desvio
+     * do Bedrock precisa saber qual e a pergunta para escolher o formulario.
+     */
+    private final Prompt initialPrompt;
+
     public SCConversation(@NotNull Plugin plugin, @NotNull Conversable forWhom, @Nullable Prompt firstPrompt) {
         this(plugin, forWhom, firstPrompt, new HashMap<>(), 10);
     }
@@ -30,6 +36,7 @@ public class SCConversation extends Conversation {
 
     public SCConversation(@NotNull Plugin plugin, @NotNull Conversable forWhom, @Nullable Prompt firstPrompt, @NotNull Map<Object, Object> initialSessionData, int timeout) {
         super(plugin, forWhom, firstPrompt, initialSessionData);
+        this.initialPrompt = firstPrompt;
         this.setLocalEchoEnabled(true);
         this.addConversationCanceller(new InactivityCanceller(plugin, timeout));
     }
@@ -41,6 +48,12 @@ public class SCConversation extends Conversation {
 
         if (oldConversation != this && oldConversation != null) {
             getForWhom().abandonConversation(oldConversation);
+        }
+
+        // Bedrock: a pergunta vira formulario em vez de chat. Vale para todas as
+        // conversas, porque todas comecam por aqui.
+        if (BedrockPrompts.intercept(this, (Player) getForWhom(), initialPrompt, getContext())) {
+            return;
         }
 
         conversations.put(uniqueId, this);
