@@ -58,6 +58,10 @@ public class SCConversation extends Conversation {
 
         conversations.put(uniqueId, this);
         super.begin();
+
+        // Depois do begin: a pergunta ja tem prompt atual, entao o formulario
+        // pode responder por acceptInput.
+        BedrockPrompts.afterBegin(this, (Player) getForWhom(), initialPrompt, getContext());
     }
 
     public void addConversationCanceller(@NotNull ConversationCanceller canceller) {

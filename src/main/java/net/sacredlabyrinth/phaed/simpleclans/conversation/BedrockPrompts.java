@@ -48,8 +48,12 @@ public final class BedrockPrompts {
     }
 
     /**
-     * @return {@code true} se o jogador recebeu o formulário e a conversa por
-     *         chat <b>não</b> deve pedir nada no chat.
+     * Chamado <b>antes</b> de a conversa começar. Só assume o fluxo quando não
+     * precisa dela — hoje, criar clã, que é resolvido recriando a conversa já
+     * com os dados.
+     *
+     * @return {@code true} se o jogador recebeu o formulário e a conversa
+     *         <b>não</b> deve começar.
      */
     public static boolean intercept(
             @NotNull SCConversation conversation,
@@ -66,17 +70,51 @@ public final class BedrockPrompts {
             if (first instanceof CreateClanTagPrompt) {
                 return createClan(plugin, player, context);
             }
-            if (first instanceof ConfirmationPrompt) {
-                return confirmation(conversation, player, first, context);
-            }
-            if (first.blocksForInput(context)) {
-                return ask(conversation, player, first, context);
-            }
             return false;
         } catch (Throwable t) {
             // Falha aqui nunca deixa o jogador sem caminho: cai na conversa por chat.
             plugin.getLogger().warning("[SimpleClans] formulário Bedrock falhou: " + t.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Chamado <b>depois</b> de a conversa começar, para as perguntas em que o
+     * formulário é só o teclado.
+     *
+     * A ordem importa: {@link org.bukkit.conversations.Conversation#acceptInput}
+     * só tem efeito numa conversa já iniciada — é ela que guarda o prompt atual.
+     * Mandar o formulário antes do begin fazia o botão de confirmar não fazer
+     * nada, que era o caso do /clan debandar.
+     */
+    public static void afterBegin(
+            @NotNull SCConversation conversation,
+            @NotNull Player player,
+            @Nullable Prompt first,
+            @Nullable ConversationContext context
+    ) {
+        if (first == null || context == null || !BedrockFrames.isBedrock(player)) {
+            return;
+        }
+        // O fluxo de criar cla ja foi resolvido pelo formulario de dois campos.
+        // Se a validacao recusar a tag, a conversa segue no prompt de erro, e
+        // perguntar de novo aqui responderia ao prompt errado.
+        if (first instanceof CreateClanTagPrompt || first instanceof CreateClanNamePrompt) {
+            return;
+        }
+
+        try {
+            if (first instanceof ConfirmationPrompt) {
+                confirmation(conversation, player, first, context);
+                return;
+            }
+            if (first.blocksForInput(context)) {
+                ask(conversation, player, first, context);
+            }
+        } catch (Throwable t) {
+            // Falha aqui nunca trava o jogador: a conversa por chat continua de pé.
+            SimpleClans.getInstance().getLogger()
+                    .warning("[SimpleClans] formulário Bedrock falhou: " + t.getMessage());
         }
     }
 
@@ -130,6 +168,8 @@ public final class BedrockPrompts {
                 .onConfirm(() -> Bukkit.getScheduler().runTask(SimpleClans.getInstance(),
                         () -> conversation.acceptInput(yes)))
                 .send();
+        // Cancelar ou fechar no X: a conversa segue viva esperando o chat, então
+        // o próprio prompt trata isso pelo tempo de inatividade.
     }
 
     /** Pergunta aberta vira um campo de texto; o formulário e o teclado. */
