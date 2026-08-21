@@ -40,6 +40,12 @@ public class InventoryDrawer {
         if (event.isCancelled()) {
             return;
 	}
+	// Jogador de Bedrock recebe o frame como formulário nativo. Aqui vale para
+	// todos os menus de uma vez, porque toda abertura passa por este ponto.
+	if (BedrockFrames.open(frame)) {
+	    return;
+	}
+
 	OPENING.put(uuid, frame);
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
 	    Inventory inventory = prepareInventory(frame);

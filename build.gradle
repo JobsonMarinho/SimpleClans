@@ -34,6 +34,7 @@ repositories {
     maven { url = 'https://nexus.scarsz.me/content/groups/public/' }
     maven { url = 'https://eldonexus.de/repository/maven-public' }
     maven { url = 'https://jitpack.io' }
+    mavenLocal() // HypedNetwork (HypedBedrockAPI): 'gradlew publishToMavenLocal' no repo dele
 }
 
 dependencies {
@@ -54,6 +55,10 @@ dependencies {
     }
     compileOnly 'me.clip:placeholderapi:2.11.7'
     compileOnly 'org.jetbrains:annotations:24.0.1'
+
+    // Menus Bedrock: quem carrega Floodgate/Cumulus no servidor e o HypedNetwork,
+    // entao aqui basta a API. compileOnly — nada disso entra no jar.
+    compileOnly 'net.hypedmc.network:shared:0.0.1-BETA'
     compileOnly 'com.sk89q:worldguard:6.1.1-SNAPSHOT'
     compileOnly 'com.github.TechFortress:GriefPrevention:17.0.0'
     compileOnly 'com.discordsrv:discordsrv:1.28.0'
