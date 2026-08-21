@@ -10,8 +10,11 @@ import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.WeakHashMap;
 
 import static net.sacredlabyrinth.phaed.simpleclans.SimpleClans.lang;
 import static net.sacredlabyrinth.phaed.simpleclans.conversation.CreateClanNamePrompt.NAME_KEY;
@@ -43,6 +46,14 @@ import static net.sacredlabyrinth.phaed.simpleclans.conversation.CreateClanTagPr
  * pendurada esperando um chat que não vem.
  */
 public final class BedrockPrompts {
+
+    /**
+     * Conversas que ja receberam formulario. Sem isso, uma conversa reiniciada
+     * (ou dois begin no mesmo fluxo) empilharia formularios — e o Bedrock os
+     * enfileira, entao o jogador teria que responder a mesma pergunta duas
+     * vezes, como aconteceu no /clan debandar.
+     */
+    private static final Set<SCConversation> SENT = Collections.newSetFromMap(new WeakHashMap<>());
 
     private BedrockPrompts() {
     }
@@ -96,6 +107,10 @@ public final class BedrockPrompts {
         if (first == null || context == null || !BedrockFrames.isBedrock(player)) {
             return;
         }
+        if (!SENT.add(conversation)) {
+            return;
+        }
+
         // O fluxo de criar cla ja foi resolvido pelo formulario de dois campos.
         // Se a validacao recusar a tag, a conversa segue no prompt de erro, e
         // perguntar de novo aqui responderia ao prompt errado.
@@ -165,11 +180,17 @@ public final class BedrockPrompts {
                 .title("Confirmar")
                 .content(question)
                 .buttons(yes, lang("cancel", player))
-                .onConfirm(() -> Bukkit.getScheduler().runTask(SimpleClans.getInstance(),
-                        () -> conversation.acceptInput(yes)))
+                .onResult(confirmed -> Bukkit.getScheduler().runTask(SimpleClans.getInstance(), () -> {
+                    if (confirmed) {
+                        conversation.acceptInput(yes);
+                    } else {
+                        // Cancelar ou fechar no X: encerra a conversa. Deixá-la viva
+                        // prenderia o chat do jogador ate o timeout — e a conversa
+                        // pendurada ainda apareceria na proxima vez que ele tentasse.
+                        player.abandonConversation(conversation);
+                    }
+                }))
                 .send();
-        // Cancelar ou fechar no X: a conversa segue viva esperando o chat, então
-        // o próprio prompt trata isso pelo tempo de inatividade.
     }
 
     /** Pergunta aberta vira um campo de texto; o formulário e o teclado. */

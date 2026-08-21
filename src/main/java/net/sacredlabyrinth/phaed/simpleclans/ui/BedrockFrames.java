@@ -149,12 +149,14 @@ public final class BedrockFrames {
             @NotNull SCComponent c
     ) {
         String label = displayName(c.getItem());
-        for (ClickType click : new ClickType[]{ClickType.LEFT, ClickType.RIGHT, ClickType.SHIFT_LEFT}) {
+        String lore = loreOf(c.getItem());
+        // Todo ClickType que tenha listener, e não uma lista fixa: o "Desfazer
+        // clã", por exemplo, está em DROP (tecla Q) e sumia do formulário.
+        for (ClickType click : ClickType.values()) {
             if (c.getListener(click) == null) {
                 continue;
             }
             String suffix = click == ClickType.LEFT ? "" : " §8(" + clickName(click) + ")";
-            String lore = loreOf(c.getItem());
             String text = label + suffix + (lore.isEmpty() ? "" : "\n§7" + lore);
             form.button(text, () -> run(frame, viewer, c, click));
         }
@@ -192,9 +194,12 @@ public final class BedrockFrames {
     }
 
     private static boolean hasAnyListener(@NotNull SCComponent c) {
-        return c.getListener(ClickType.LEFT) != null
-                || c.getListener(ClickType.RIGHT) != null
-                || c.getListener(ClickType.SHIFT_LEFT) != null;
+        for (ClickType click : ClickType.values()) {
+            if (c.getListener(click) != null) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Item sem ação: vira "Nome — primeira linha da lore" no corpo. */
@@ -241,15 +246,20 @@ public final class BedrockFrames {
         return String.join(" · ", lines);
     }
 
+    /** Rotulo do clique alternativo, para o jogador saber que e outra acao. */
     @NotNull
     private static String clickName(@NotNull ClickType click) {
         switch (click) {
             case RIGHT:
+            case SHIFT_RIGHT:
                 return "alternativo";
-            case SHIFT_LEFT:
-                return "extra";
+            case DROP:
+            case CONTROL_DROP:
+                return "descartar";
+            case MIDDLE:
+                return "do meio";
             default:
-                return "";
+                return "extra";
         }
     }
 
