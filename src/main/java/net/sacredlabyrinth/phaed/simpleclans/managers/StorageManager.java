@@ -1449,7 +1449,13 @@ public final class StorageManager {
      * @param forceImmediate if true, bypasses periodic save setting and updates immediately
      */
     public void updateClanPlayer(ClanPlayer cp, boolean forceImmediate) {
-        cp.updateLastSeen();
+        // Refresh last_seen only while the player is actually online (checked from
+        // the main thread, where the online lookup is safe). Persisting an offline
+        // player - rank change, trust, admin edits - must never fake a presence;
+        // login/logout already renew it explicitly via ClanManager#updateLastSeen.
+        if (Bukkit.isPrimaryThread() && cp.toPlayer() != null) {
+            cp.updateLastSeen();
+        }
         plugin.getProxyManager().sendUpdate(cp);
         if (!forceImmediate && plugin.getSettingsManager().is(PERFORMANCE_SAVE_PERIODICALLY)) {
             modifiedClanPlayers.add(cp);
