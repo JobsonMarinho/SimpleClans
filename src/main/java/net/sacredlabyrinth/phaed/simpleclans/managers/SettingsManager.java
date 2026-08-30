@@ -313,7 +313,6 @@ public final class SettingsManager {
         TAG_REGEX("settings.tag-regex", ""),
         ACCEPT_OTHER_ALPHABETS_LETTERS("settings.accept-other-alphabets-letters-on-tag", false),
         DATE_TIME_PATTERN("settings.date-time-pattern", "HH:mm - dd/MM/yyyy"),
-        BUNGEE_SERVERS("settings.bungee-servers"),
         /*
         ================
         > Tag Settings
@@ -594,8 +593,29 @@ public final class SettingsManager {
         PERFORMANCE_SAVE_PERIODICALLY("performance.save-periodically", true),
         PERFORMANCE_SAVE_INTERVAL("performance.save-interval", 10),
         PERFORMANCE_USE_THREADS("performance.use-threads", true),
-        PERFORMANCE_USE_BUNGEECORD("performance.use-bungeecord", false),
         PERFORMANCE_HEAD_CACHING("performance.cache-player-heads", false),
+        /*
+        ================
+        > Network Settings (cross-server over Redis)
+        ================
+         */
+        NETWORK_ENABLED("network.enabled", false),
+        NETWORK_SERVER_NAME("network.server-name", ""),
+        NETWORK_CHANNEL("network.channel", "simpleclans"),
+        NETWORK_SERVERS("network.servers"),
+        NETWORK_MODE("network.mode", "NORMAL"),
+        NETWORK_DISABLED_FEATURES("network.disabled-features"),
+        NETWORK_PRESENCE_INTERVAL("network.presence-interval-seconds", 30),
+        NETWORK_PRESENCE_TIMEOUT("network.presence-timeout-seconds", 120),
+        NETWORK_PERSIST_RECEIVED("network.persist-received-updates", true),
+        NETWORK_BOOT_SYNC("network.boot-sync", true),
+        NETWORK_REDIS_HOST("network.redis.host", "127.0.0.1"),
+        NETWORK_REDIS_PORT("network.redis.port", 6379),
+        NETWORK_REDIS_PASSWORD("network.redis.password", ""),
+        NETWORK_REDIS_DATABASE("network.redis.database", 0),
+        NETWORK_REDIS_TIMEOUT("network.redis.timeout-millis", 3000),
+        NETWORK_REDIS_POOL_SIZE("network.redis.pool-size", 8),
+        NETWORK_REDIS_SSL("network.redis.ssl", false),
 
         SAFE_CIVILIANS("safe-civilians", false);
 

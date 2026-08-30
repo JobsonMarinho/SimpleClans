@@ -1,10 +1,12 @@
 package net.sacredlabyrinth.phaed.simpleclans;
 
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 
 import static net.sacredlabyrinth.phaed.simpleclans.managers.SettingsManager.ConfigField.REQUEST_MAX;
 
@@ -19,6 +21,22 @@ public final class Request {
     private ClanRequest type;
     private ClanPlayer requester;
     private int askCount;
+    /**
+     * The key this request is filed under in the RequestManager map. It is also
+     * how the other servers refer to it, so it has to be stable and unique.
+     */
+    private @Nullable String key;
+    /**
+     * Set for {@link ClanRequest#INVITE}: the invited player may well be on
+     * another server, where {@code Bukkit.getPlayerExact} finds nothing.
+     */
+    private @Nullable UUID targetUniqueId;
+    /**
+     * The server that opened the request, or null when we opened it ourselves.
+     * Only the owner runs the outcome; everyone else holds a replica whose sole
+     * job is to accept a vote and relay it back.
+     */
+    private @Nullable String owner;
 
     public Request(ClanRequest type,
                    @Nullable List<ClanPlayer> acceptors,
@@ -172,6 +190,40 @@ public final class Request {
      */
     public void setRequester(ClanPlayer requester) {
         this.requester = requester;
+    }
+
+    public @Nullable String getKey() {
+        return key;
+    }
+
+    public void setKey(@NotNull String key) {
+        this.key = key;
+    }
+
+    public @Nullable UUID getTargetUniqueId() {
+        return targetUniqueId;
+    }
+
+    public void setTargetUniqueId(@Nullable UUID targetUniqueId) {
+        this.targetUniqueId = targetUniqueId;
+    }
+
+    /**
+     * @return the server that owns this request, or null when it is ours
+     */
+    public @Nullable String getOwner() {
+        return owner;
+    }
+
+    public void setOwner(@Nullable String owner) {
+        this.owner = owner;
+    }
+
+    /**
+     * @return true when this is a copy of a request owned by another server
+     */
+    public boolean isReplica() {
+        return owner != null;
     }
 
     public void incrementAskCount() {

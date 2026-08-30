@@ -5,7 +5,7 @@ plugins {
 }
 
 group = 'net.sacredlabyrinth.phaed.simpleclans'
-version = '2.19.3-SNAPSHOT'
+version = '2.19.4-SNAPSHOT'
 description = 'SimpleClans'
 
 // --- git describe (replaces the Maven git-commit-id plugin for plugin.yml) ---
@@ -46,6 +46,12 @@ dependencies {
     implementation 'com.google.code.gson:gson:2.10.1'
     // HikariCP 4.0.3: last version compatible with Java 8
     implementation 'com.zaxxer:HikariCP:4.0.3'
+    // Jedis 5.2.0: last line with a Java 8 baseline. Transporte da rede (pub/sub).
+    // json/gson dos modulos RediSearch/JSON nao sao usados aqui - excluidos pra nao inchar o jar.
+    implementation('redis.clients:jedis:5.2.0') {
+        exclude group: 'org.json', module: 'json'
+        exclude group: 'com.google.code.gson', module: 'gson'
+    }
 
     // --- Not bundled (Maven "provided" scope); annotations excluded from shading ---
     compileOnly 'org.spigotmc:spigot-api:1.16.4-R0.1-SNAPSHOT'
@@ -117,6 +123,8 @@ shadowJar {
     relocate 'com.google.gson', 'net.sacredlabyrinth.phaed.simpleclans.gson'
     relocate 'com.zaxxer.hikari', 'net.sacredlabyrinth.phaed.simpleclans.hikari'
     relocate 'org.slf4j', 'net.sacredlabyrinth.phaed.simpleclans.slf4j'
+    relocate 'redis.clients.jedis', 'net.sacredlabyrinth.phaed.simpleclans.jedis'
+    relocate 'org.apache.commons.pool2', 'net.sacredlabyrinth.phaed.simpleclans.pool2'
 }
 
 // Make `build` produce the shaded jar (Maven shade ran on `package`)

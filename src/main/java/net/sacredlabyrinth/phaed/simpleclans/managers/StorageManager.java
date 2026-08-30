@@ -1109,6 +1109,53 @@ public final class StorageManager {
     }
 
     /**
+     * Buffers an object changed on another server so this server writes it too.
+     * <p>
+     * The two servers hold the very same synchronized state, so writing it twice
+     * is idempotent - and it means a change does not die with the server that
+     * originated it if that one crashes before its own periodic save.
+     *
+     * @since 2.19.4
+     */
+    public void markPendingSave(@NotNull Clan clan) {
+        if (plugin.getSettingsManager().is(PERFORMANCE_SAVE_PERIODICALLY)) {
+            modifiedClans.add(clan);
+        }
+    }
+
+    /**
+     * @see #markPendingSave(Clan)
+     * @since 2.19.4
+     */
+    public void markPendingSave(@NotNull ClanPlayer cp) {
+        if (plugin.getSettingsManager().is(PERFORMANCE_SAVE_PERIODICALLY)) {
+            modifiedClanPlayers.add(cp);
+        }
+    }
+
+    /**
+     * The clans changed here but not written to the database yet - precisely what
+     * a server that just booted is missing from its own read.
+     *
+     * @since 2.19.4
+     */
+    public @NotNull List<Clan> getPendingClans() {
+        synchronized (modifiedClans) {
+            return new ArrayList<>(modifiedClans);
+        }
+    }
+
+    /**
+     * @see #getPendingClans()
+     * @since 2.19.4
+     */
+    public @NotNull List<ClanPlayer> getPendingClanPlayers() {
+        synchronized (modifiedClanPlayers) {
+            return new ArrayList<>(modifiedClanPlayers);
+        }
+    }
+
+    /**
      * Update a clan to the database
      *
      * @param clan           clan to update

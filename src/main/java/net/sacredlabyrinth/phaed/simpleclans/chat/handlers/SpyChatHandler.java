@@ -15,7 +15,6 @@ import java.util.stream.Collectors;
 import static net.sacredlabyrinth.phaed.simpleclans.chat.SCMessage.Source;
 import static net.sacredlabyrinth.phaed.simpleclans.chat.SCMessage.Source.*;
 import static net.sacredlabyrinth.phaed.simpleclans.managers.SettingsManager.ConfigField;
-import static net.sacredlabyrinth.phaed.simpleclans.managers.SettingsManager.ConfigField.PERFORMANCE_USE_BUNGEECORD;
 
 /**
  * Handles delivering messages from {@link Source#SPIGOT} or {@link Source#DISCORD} to internal spy chat.
@@ -39,7 +38,7 @@ public class SpyChatHandler implements ChatHandler {
 
     @Override
     public boolean canHandle(SCMessage.Source source) {
-        return source == SPIGOT || (source == PROXY && settingsManager.is(PERFORMANCE_USE_BUNGEECORD))
+        return source == SPIGOT || (source == PROXY && plugin.getProxyManager().isEnabled())
                 || (source == DISCORD && chatManager.isDiscordHookEnabled());
     }
 

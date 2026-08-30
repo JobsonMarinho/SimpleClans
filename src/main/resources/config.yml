@@ -57,7 +57,6 @@ settings:
     username-regex: '(\.|\*){0,1}[a-zA-Z0-9_$]{1,16}'
     tag-regex: ''
     date-time-pattern: 'HH:mm - dd/MM/yyyy'
-    bungee-servers: []
 war-and-protection:
     war-enabled: false
     land-sharing: true
@@ -255,4 +254,67 @@ performance:
   save-periodically: true
   save-interval: 10
   use-threads: true
-  use-bungeecord: false
+
+# ---------------------------------------------------------------------------
+# REDE (vários servidores compartilhando o MESMO banco de clãs)
+# ---------------------------------------------------------------------------
+# O SimpleClans lê o banco UMA vez, no boot, e a partir daí a memória é a
+# verdade. Dois servidores no mesmo banco sem esta seção ligada sobrescrevem os
+# dados um do outro. Com ela ligada, toda mudança é replicada na hora por Redis.
+#
+# ATENÇÃO: os servidores da rede precisam rodar EXATAMENTE o mesmo jar. O sync
+# copia campos por reflexão; builds diferentes seriam incompatíveis. O plugin
+# detecta isso pela versão de protocolo e recusa as mensagens em vez de corromper.
+network:
+  # Liga a replicação. Com false o servidor roda isolado (comportamento clássico).
+  enabled: false
+
+  # Nome DESTE servidor na rede. Precisa ser único e estável — é por ele que os
+  # outros endereçam mensagens e sabem quem é a origem de cada mudança.
+  server-name: ''
+
+  # Canal de pub/sub. Servidores em canais diferentes não se enxergam: use isso
+  # para separar redes que dividem o mesmo Redis.
+  channel: 'simpleclans'
+
+  # Lista branca de servidores aceitos. Vazio = aceita qualquer um do canal.
+  # Preencha com os server-name dos peers: é a proteção contra um servidor de
+  # OUTRO banco entrar no canal por engano e despejar clãs alheios aqui.
+  servers: []
+
+  # NORMAL = tudo ligado.
+  # GARDEN = servidor secundário (tipicamente numa versão do Minecraft bem mais
+  #          nova) que divide o mesmo banco. Desliga o que não sobrevive à
+  #          diferença de versão ou o que competiria com o servidor principal.
+  mode: 'NORMAL'
+
+  # Recursos desligados NESTE servidor. Vazio = usa o padrão do modo acima
+  # (o GARDEN desliga banner, cape, home, regroup, war, land e bank).
+  # Preenchendo a lista, ela passa a valer exatamente como escrita.
+  # Valores: banner, cape, home, regroup, war, land, bank, fee
+  disabled-features: []
+
+  # De quantos em quantos segundos este servidor anuncia quem está online nele.
+  # É o que faz /clan invite enxergar jogador do outro servidor.
+  presence-interval-seconds: 30
+
+  # Depois de quantos segundos calados os jogadores de um servidor são esquecidos.
+  presence-timeout-seconds: 120
+
+  # Grava também as mudanças recebidas dos outros servidores. Deixe true: sem
+  # isso, uma mudança feita no outro servidor vive só na memória daqui e morre
+  # junto com ele se cair antes do save periódico dele.
+  persist-received-updates: true
+
+  # No boot, pede aos outros servidores o que eles ainda não gravaram no banco.
+  # É o que fecha a janela entre o último save periódico deles e a nossa leitura.
+  boot-sync: true
+
+  redis:
+    host: '127.0.0.1'
+    port: 6379
+    password: ''
+    database: 0
+    timeout-millis: 3000
+    pool-size: 8
+    ssl: false

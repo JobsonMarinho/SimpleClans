@@ -10,7 +10,6 @@ import org.bukkit.scheduler.BukkitRunnable;
 
 import static net.sacredlabyrinth.phaed.simpleclans.chat.SCMessage.Source.*;
 import static net.sacredlabyrinth.phaed.simpleclans.managers.SettingsManager.ConfigField;
-import static net.sacredlabyrinth.phaed.simpleclans.managers.SettingsManager.ConfigField.PERFORMANCE_USE_BUNGEECORD;
 import static org.bukkit.Bukkit.getPluginManager;
 
 @SuppressWarnings("unused")
@@ -68,7 +67,7 @@ public class SpigotChatHandler implements ChatHandler {
 
     @Override
     public boolean canHandle(SCMessage.Source source) {
-        return source == SPIGOT || (source == PROXY && settingsManager.is(PERFORMANCE_USE_BUNGEECORD))
+        return source == SPIGOT || (source == PROXY && plugin.getProxyManager().isEnabled())
                 || (source == DISCORD && chatManager.isDiscordHookEnabled());
     }
 }

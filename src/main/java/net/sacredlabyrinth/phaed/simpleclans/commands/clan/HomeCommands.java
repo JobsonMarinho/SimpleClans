@@ -35,7 +35,7 @@ public class HomeCommands extends BaseCommand {
 
     @Subcommand("%regroup %me")
     @CommandPermission("simpleclans.leader.regroup.me")
-    @Conditions("rank:name=REGROUP_ME")
+    @Conditions("feature:name=REGROUP|rank:name=REGROUP_ME")
     @Description("{@@command.description.regroup.me}")
     public void regroupMe(Player player, ClanPlayer cp, Clan clan) {
         if (!settings.is(ALLOW_REGROUP)) {
@@ -59,7 +59,7 @@ public class HomeCommands extends BaseCommand {
 
     @Subcommand("%regroup %home")
     @CommandPermission("simpleclans.leader.regroup.home")
-    @Conditions("rank:name=REGROUP_HOME")
+    @Conditions("feature:name=REGROUP|rank:name=REGROUP_HOME")
     @Description("{@@command.description.regroup.home}")
     public void regroupHome(Player player, ClanPlayer cp, @Conditions("can_teleport") Clan clan) {
         if (!settings.is(ALLOW_REGROUP)) {
@@ -72,7 +72,7 @@ public class HomeCommands extends BaseCommand {
 
     @Subcommand("%home")
     @CommandPermission("simpleclans.member.home")
-    @Conditions("rank:name=HOME_TP")
+    @Conditions("feature:name=HOME|rank:name=HOME_TP")
     @Description("{@@command.description.home.tp}")
     public void teleport(Player player, @Conditions("can_teleport") Clan clan, ClanPlayer cp) {
         Location homeLocation = clan.getHomeLocation();
@@ -84,7 +84,7 @@ public class HomeCommands extends BaseCommand {
 
     @Subcommand("%home %clear")
     @CommandPermission("simpleclans.leader.home-set")
-    @Conditions("rank:name=HOME_SET")
+    @Conditions("feature:name=HOME|rank:name=HOME_SET")
     @Description("{@@command.description.home.clear}")
     public void clear(Player player, ClanPlayer cp, Clan clan) {
         if (settings.is(CLAN_HOMEBASE_CAN_BE_SET_ONLY_ONCE) && clan.getHomeLocation() != null &&
@@ -104,7 +104,7 @@ public class HomeCommands extends BaseCommand {
     }
 
     @Subcommand("%home %set")
-    @Conditions("rank:name=HOME_SET")
+    @Conditions("feature:name=HOME|rank:name=HOME_SET")
     @CommandPermission("simpleclans.leader.home-set")
     @Description("{@@command.description.home.set}")
     public void set(Player player, ClanPlayer cp, Clan clan) {

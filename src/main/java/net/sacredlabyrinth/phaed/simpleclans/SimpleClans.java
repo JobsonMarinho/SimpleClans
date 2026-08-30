@@ -13,8 +13,9 @@ import net.sacredlabyrinth.phaed.simpleclans.managers.*;
 import net.sacredlabyrinth.phaed.simpleclans.migrations.BbMigration;
 import net.sacredlabyrinth.phaed.simpleclans.migrations.ChatFormatMigration;
 import net.sacredlabyrinth.phaed.simpleclans.migrations.LanguageMigration;
-import net.sacredlabyrinth.phaed.simpleclans.proxy.BungeeManager;
+import net.sacredlabyrinth.phaed.simpleclans.proxy.LocalProxyManager;
 import net.sacredlabyrinth.phaed.simpleclans.proxy.ProxyManager;
+import net.sacredlabyrinth.phaed.simpleclans.proxy.redis.RedisProxyManager;
 import net.sacredlabyrinth.phaed.simpleclans.tasks.*;
 import net.sacredlabyrinth.phaed.simpleclans.ui.InventoryController;
 import net.sacredlabyrinth.phaed.simpleclans.utils.ChatUtils;
@@ -62,6 +63,7 @@ public class SimpleClans extends JavaPlugin {
     private ProtectionManager protectionManager;
     private ChatManager chatManager;
     private ProxyManager proxyManager;
+    private FeatureManager featureManager;
     private boolean hasUUID;
     private static final Pattern ACF_PLACEHOLDER_PATTERN = Pattern.compile("\\{(?<key>[a-zA-Z]+?)}");
 
@@ -112,9 +114,12 @@ public class SimpleClans extends JavaPlugin {
         this.hasUUID = UUIDMigration.canReturnUUID();
 
         permissionsManager = new PermissionsManager();
+        featureManager = new FeatureManager(this);
         requestManager = new RequestManager();
         clanManager = new ClanManager();
-        proxyManager = new BungeeManager(this);
+        // built before the storage: the startup purge deletes clans from the
+        // shared database and the other servers have to hear about it
+        proxyManager = createProxyManager();
         storageManager = new StorageManager();
         tagReservationManager = new TagReservationManager(this);
         teleportManager = new TeleportManager();
@@ -130,6 +135,10 @@ public class SimpleClans extends JavaPlugin {
 
         tagValidator = new TagValidator(settingsManager, permissionsManager);
 
+        // only now: the clan cache is loaded, so an incoming update is applied
+        // over real data instead of over a cache importFromDatabase would wipe
+        proxyManager.start();
+
         logStatus();
         startTasks();
         startMetrics();
@@ -137,9 +146,26 @@ public class SimpleClans extends JavaPlugin {
         new UpdateChecker(this).check();
     }
 
+    private ProxyManager createProxyManager() {
+        if (!settingsManager.is(NETWORK_ENABLED)) {
+            return new LocalProxyManager(settingsManager.getString(NETWORK_SERVER_NAME));
+        }
+        try {
+            return new RedisProxyManager(this);
+        } catch (Exception ex) {
+            // a bad host or an unreachable Redis must not take the plugin down:
+            // fall back to single-server behaviour and say so loudly
+            getLogger().log(Level.SEVERE, "Could not start the clan network, "
+                    + "running as a standalone server instead", ex);
+            return new LocalProxyManager(settingsManager.getString(NETWORK_SERVER_NAME));
+        }
+    }
+
     private void logStatus() {
         getLogger().info("Multithreading: " + settingsManager.is(PERFORMANCE_USE_THREADS));
-        getLogger().info("BungeeCord: " + settingsManager.is(PERFORMANCE_USE_BUNGEECORD));
+        getLogger().info("Network: " + (proxyManager.isEnabled()
+                ? "Redis, as '" + proxyManager.getServerName() + "'" : "disabled"));
+        getLogger().info("Mode: " + featureManager.describe());
         getLogger().info("HEX support: " + ChatUtils.HEX_COLOR_SUPPORT);
         getLogger().info("Help us translate SimpleClans to your language! " +
                 "Access https://crowdin.com/project/simpleclans/");
@@ -183,7 +209,8 @@ public class SimpleClans extends JavaPlugin {
         metrics.addCustomChart(new SimplePie("clan_verification", () -> sm.is(REQUIRE_VERIFICATION) ? on : off));
         metrics.addCustomChart(new SimplePie("money_per_kill", () -> sm.is(ECONOMY_MONEY_PER_KILL) ? on : off));
         metrics.addCustomChart(new SimplePie("threads", () -> sm.is(PERFORMANCE_USE_THREADS) ? on : off));
-        metrics.addCustomChart(new SimplePie("bungeecord", () -> sm.is(PERFORMANCE_USE_BUNGEECORD) ? on : off));
+        metrics.addCustomChart(new SimplePie("network", () -> sm.is(NETWORK_ENABLED) ? "redis" : off));
+        metrics.addCustomChart(new SimplePie("server_mode", () -> getFeatureManager().getMode().name()));
         metrics.addCustomChart(new SimplePie("discord_chat", () -> sm.is(DISCORDCHAT_ENABLE) ? on : off));
         metrics.addCustomChart(new SimplePie("default_rank", () -> sm.getString(CLAN_DEFAULT_RANK).isEmpty() ? off : on));
     }
@@ -209,12 +236,23 @@ public class SimpleClans extends JavaPlugin {
         if (getSettingsManager().is(PERFORMANCE_SAVE_PERIODICALLY)) {
             getStorageManager().saveModified();
         }
+        if (proxyManager != null) {
+            proxyManager.shutdown();
+        }
         if (discordWebhookService != null) {
             discordWebhookService.shutdown();
         }
         getStorageManager().closeConnection();
         getPermissionsManager().savePermissions();
         getSettingsManager().loadAndSave();
+    }
+
+    /**
+     * @return which features are allowed to run on this server
+     * @since 2.19.4
+     */
+    public FeatureManager getFeatureManager() {
+        return featureManager;
     }
 
     /**

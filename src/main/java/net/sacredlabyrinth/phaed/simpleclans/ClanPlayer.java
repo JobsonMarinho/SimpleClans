@@ -5,6 +5,7 @@ import net.sacredlabyrinth.phaed.simpleclans.managers.ProtectionManager.Action;
 import net.sacredlabyrinth.phaed.simpleclans.managers.SettingsManager;
 import net.sacredlabyrinth.phaed.simpleclans.utils.DateFormat;
 import net.sacredlabyrinth.phaed.simpleclans.utils.VanishUtils;
+import net.sacredlabyrinth.phaed.simpleclans.network.NoNetworkSync;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.OfflinePlayer;
@@ -41,6 +42,13 @@ public class ClanPlayer implements Serializable, Comparable<ClanPlayer> {
     private long joinDate;
     private final Set<String> pastClans = new LinkedHashSet<>();
     private final Map<String, Long> resignTimes = new HashMap<>();
+    /**
+     * Never replicated: this is scratch state belonging to a pending
+     * {@link Request}, not to the player. Votes travel as explicit
+     * {@link net.sacredlabyrinth.phaed.simpleclans.network.MessageType#REQUEST_VOTE}
+     * messages so an unrelated player update cannot clobber a live poll.
+     */
+    @NoNetworkSync
     private @Nullable VoteResult vote;
     private Flags flags = new Flags(null);
 

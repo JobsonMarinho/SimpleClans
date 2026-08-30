@@ -2,6 +2,7 @@ package net.sacredlabyrinth.phaed.simpleclans.commands.completions;
 
 import co.aikar.commands.BukkitCommandCompletionContext;
 import co.aikar.commands.InvalidCommandArgument;
+import net.sacredlabyrinth.phaed.simpleclans.ClanPlayer;
 import net.sacredlabyrinth.phaed.simpleclans.SimpleClans;
 import net.sacredlabyrinth.phaed.simpleclans.utils.VanishUtils;
 import org.bukkit.Bukkit;
@@ -24,16 +25,26 @@ public class NonMembersCompletion extends AbstractSyncCompletion {
 
     @Override
     public Collection<String> getCompletions(BukkitCommandCompletionContext c) throws InvalidCommandArgument {
-        Collection<String> onlinePlayers = new ArrayList<>();
+        Collection<String> candidates = new ArrayList<>();
 
         for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
             boolean vanished = VanishUtils.isVanished(c.getSender(), onlinePlayer);
             if (clanManager.getClanByPlayerUniqueId(onlinePlayer.getUniqueId()) != null || (c.hasConfig("ignore_vanished") && vanished)) {
                 continue;
             }
-            onlinePlayers.add(onlinePlayer.getName());
+            candidates.add(onlinePlayer.getName());
         }
 
-        return onlinePlayers;
+        // players on the other servers can be invited too, so they belong here;
+        // vanish is not visible from here and is enforced by their own server
+        for (String remote : plugin.getProxyManager().getRemotePlayers()) {
+            ClanPlayer cp = clanManager.getAnyClanPlayer(remote);
+            if (cp != null && cp.getClan() != null) {
+                continue;
+            }
+            candidates.add(remote);
+        }
+
+        return candidates;
     }
 }

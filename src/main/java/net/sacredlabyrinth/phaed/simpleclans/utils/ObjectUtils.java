@@ -1,5 +1,7 @@
 package net.sacredlabyrinth.phaed.simpleclans.utils;
 
+import net.sacredlabyrinth.phaed.simpleclans.network.NoNetworkSync;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.Collection;
@@ -16,6 +18,14 @@ public final class ObjectUtils {
         }
         Field[] fields = origin.getClass().getDeclaredFields();
         for (Field field : fields) {
+            // the codec never puts these on the wire, so the incoming snapshot
+            // carries a default value that would wipe the local one
+            if (field.isAnnotationPresent(NoNetworkSync.class)) {
+                continue;
+            }
+            if (Modifier.isStatic(field.getModifiers())) {
+                continue;
+            }
             field.setAccessible(true);
             if (Modifier.isFinal(field.getModifiers())) {
                 copyValues(field, field.get(origin), field.get(destination));

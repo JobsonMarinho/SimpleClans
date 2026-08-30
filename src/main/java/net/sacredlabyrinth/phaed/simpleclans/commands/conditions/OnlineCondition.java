@@ -34,6 +34,13 @@ public class OnlineCondition extends AbstractParameterCondition<ClanPlayerInput>
             if (!isVanished || !context.hasConfig("ignore_vanished")) {
                 return;
             }
+            throw new ConditionFailedException(lang("other.player.must.be.online", execContext.getSender()));
+        }
+
+        // not here, but they may be on another server of the clan network;
+        // vanish is checked by the server actually hosting them
+        if (plugin.getProxyManager().isOnline(clanPlayer.getName())) {
+            return;
         }
 
         throw new ConditionFailedException(lang("other.player.must.be.online", execContext.getSender()));

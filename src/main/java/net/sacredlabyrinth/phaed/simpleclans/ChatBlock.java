@@ -3,6 +3,7 @@ package net.sacredlabyrinth.phaed.simpleclans;
 import net.sacredlabyrinth.phaed.simpleclans.utils.ChatUtils;
 import org.bukkit.ChatColor;
 import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -562,7 +563,14 @@ public class ChatBlock {
     }
 
     public static void sendMessageKey(@NotNull ClanPlayer clanPlayer, @NotNull String key, @NotNull Object... args) {
-        sendMessageKey(clanPlayer.toPlayer(), key, args);
+        Player player = clanPlayer.toPlayer();
+        if (player != null) {
+            sendMessageKey(player, key, args);
+            return;
+        }
+        // connected to another server: route it through the network instead of
+        // silently dropping the message
+        sendMessage(clanPlayer, lang(key, clanPlayer, args));
     }
 
     @Deprecated

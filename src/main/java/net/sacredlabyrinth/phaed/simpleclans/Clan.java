@@ -3,6 +3,7 @@ package net.sacredlabyrinth.phaed.simpleclans;
 import net.md_5.bungee.api.chat.BaseComponent;
 import net.md_5.bungee.api.chat.HoverEvent;
 import net.md_5.bungee.api.chat.TextComponent;
+import net.sacredlabyrinth.phaed.simpleclans.network.NoNetworkSync;
 import net.sacredlabyrinth.phaed.simpleclans.events.*;
 import net.sacredlabyrinth.phaed.simpleclans.hooks.papi.Placeholder;
 import net.sacredlabyrinth.phaed.simpleclans.loggers.BankLog;
@@ -62,6 +63,12 @@ public class Clan implements Serializable, Comparable<Clan> {
     private boolean feeEnabled;
     private List<Rank> ranks = new ArrayList<>();
     private @Nullable String defaultRank = null;
+    /**
+     * Never replicated: it is a serialized ItemStack, and a banner written by a
+     * modern server cannot be deserialized by a legacy one (nor the other way
+     * round). Each server keeps the copy it read from the shared database.
+     */
+    @NoNetworkSync
     private @Nullable ItemStack banner;
 
     /**

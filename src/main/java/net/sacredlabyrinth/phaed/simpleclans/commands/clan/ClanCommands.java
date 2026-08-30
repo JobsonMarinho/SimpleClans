@@ -44,7 +44,7 @@ public class ClanCommands extends BaseCommand {
 
     @Subcommand("%war %start")
     @CommandPermission("simpleclans.leader.war")
-    @Conditions("verified|rank:name=WAR_START")
+    @Conditions("feature:name=WAR|verified|rank:name=WAR_START")
     @Description("{@@command.description.war.start}")
     @CommandCompletion("@rivals")
     public void startWar(Player player, ClanPlayer requester, Clan requestClan, @Conditions("can_war_target") @Name("clan") ClanInput targetClanInput) {
@@ -67,7 +67,7 @@ public class ClanCommands extends BaseCommand {
 
     @Subcommand("%war %end")
     @CommandPermission("simpleclans.leader.war")
-    @Conditions("verified|rank:name=WAR_END")
+    @Conditions("feature:name=WAR|verified|rank:name=WAR_END")
     @Description("{@@command.description.war.end}")
     @CommandCompletion("@warring_clans")
     public void endWar(ClanPlayer cp, Clan issuerClan, @Name("clan") ClanInput other) {
@@ -112,7 +112,7 @@ public class ClanCommands extends BaseCommand {
 
     @Subcommand("%setbanner")
     @CommandPermission("simpleclans.leader.setbanner")
-    @Conditions("verified|rank:name=SETBANNER")
+    @Conditions("feature:name=BANNER|verified|rank:name=SETBANNER")
     @Description("{@@command.description.setbanner}")
     public void setbanner(Player player, Clan clan) {
         @SuppressWarnings("deprecation")
@@ -134,22 +134,25 @@ public class ClanCommands extends BaseCommand {
     @Description("{@@command.description.invite}")
     public void invite(Player sender, ClanPlayer cp, Clan clan,
                        @Conditions("not_banned|not_in_clan|online:ignore_vanished") @Name("player") ClanPlayerInput invited) {
-        if (!invited.getClanPlayer().isInviteEnabled()) {
+        ClanPlayer invitedCp = invited.getClanPlayer();
+        if (!invitedCp.isInviteEnabled()) {
             ChatBlock.sendMessage(sender, RED + lang("invitedplayer.invite.off", sender));
             return;
         }
-        Player invitedPlayer = invited.getClanPlayer().toPlayer();
-        if (invitedPlayer == null) return;
-        if (!permissions.has(invitedPlayer, "simpleclans.member.can-join")) {
+        if (invitedCp.getUniqueId().equals(sender.getUniqueId())) {
+            ChatBlock.sendMessage(sender, RED + lang("you.cannot.invite.yourself", sender));
+            return;
+        }
+        // The invited player may be connected to another server of the network,
+        // where there is no local Player to read a Bukkit permission from. We
+        // check can-join only when we can, rather than refusing the invite.
+        Player invitedPlayer = invitedCp.toPlayer();
+        if (invitedPlayer != null && !permissions.has(invitedPlayer, "simpleclans.member.can-join")) {
             ChatBlock.sendMessage(sender, RED +
                     lang("the.player.doesn.t.not.have.the.permissions.to.join.clans", sender));
             return;
         }
-        if (invitedPlayer.getUniqueId().equals(sender.getUniqueId())) {
-            ChatBlock.sendMessage(sender, RED + lang("you.cannot.invite.yourself", sender));
-            return;
-        }
-        long minutesBeforeRejoin = cm.getMinutesBeforeRejoin(invited.getClanPlayer(), clan);
+        long minutesBeforeRejoin = cm.getMinutesBeforeRejoin(invitedCp, clan);
         if (minutesBeforeRejoin != 0) {
             ChatBlock.sendMessage(sender, RED +
                     lang("the.player.must.wait.0.before.joining.your.clan.again", sender, minutesBeforeRejoin));
@@ -164,9 +167,9 @@ public class ClanCommands extends BaseCommand {
             return;
         }
 
-        requestManager.addInviteRequest(cp, invitedPlayer.getName(), clan);
+        requestManager.addInviteRequest(cp, invitedCp.getName(), clan, invitedCp.getUniqueId());
         ChatBlock.sendMessage(sender, AQUA + lang("has.been.asked.to.join",
-                sender, invitedPlayer.getName(), clan.getName()));
+                sender, invitedCp.getName(), clan.getName()));
     }
 
     @Subcommand("%fee %check")

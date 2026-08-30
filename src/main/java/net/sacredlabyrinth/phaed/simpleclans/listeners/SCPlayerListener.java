@@ -80,6 +80,9 @@ public class SCPlayerListener extends SCListener {
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event) {
         final Player player = event.getPlayer();
+        // announced before the blacklist check: the other servers track presence
+        // for invites and private messages, which a blacklisted world must not hide
+        plugin.getProxyManager().announceJoin(player);
         if (isBlacklistedWorld(player)) {
             return;
         }
@@ -117,6 +120,7 @@ public class SCPlayerListener extends SCListener {
 
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent event) {
+        plugin.getProxyManager().announceQuit(event.getPlayer());
         ClanPlayer cp = plugin.getClanManager().getClanPlayer(event.getPlayer());
         if (cp != null) {
             Clan clan = Objects.requireNonNull(cp.getClan());
