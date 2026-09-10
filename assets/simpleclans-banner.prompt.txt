@@ -1,0 +1,4 @@
+Ferramenta: image_gen nativa (OpenAI). Imagem gerada por IA.
+Uso: banner do README do SimpleClans.
+
+Use case: stylized-concept. Asset type: premium panoramic 3:1 GitHub README header. Create a cinematic Minecraft voxel banner for SimpleClans, a player clan system. Scene: an impressive medieval guild fortress with two groups of blocky adventurers united in front of their heraldic standards, blue and crimson banners with abstract emblems, a central crossed-shields crest, bridges joining allied towers in a green mountainous valley. Exact large centered title "SimpleClans", Simple in gold and Clans in bright silver, beveled block lettering with clear dark outlines and all letters fully visible with generous margins. Warm sunrise rim light, rich navy and burgundy accents, detailed voxel stone, polished cinematic depth. Heroic teamwork, no active battle. Only this title; no Hyped prefix, no subtitle, no other text, no watermark, no HUD.

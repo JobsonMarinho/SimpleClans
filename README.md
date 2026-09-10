@@ -1,3 +1,5 @@
+![SimpleClans — clãs e estandartes diante de uma fortaleza](assets/simpleclans-banner.png)
+
 [![SimpleClans Logo](https://i.imgur.com/9vgfVdX.png)](https://www.spigotmc.org/resources/simpleclans.71242/)
 
 SimpleClans
