@@ -7,9 +7,8 @@ softdepend:
   - LuckPerms
   - WorldGuard
   - DiscordSRV
-  # Menus Bedrock: o HypedNetwork expoe a API e carrega o Floodgate.
-  - HypedNetwork
-  - HypedNetworkLegacy
+  # Menus Bedrock: o plugin HypedBedrockAPI expoe a API e carrega o Floodgate.
+  - HypedBedrockAPI
   - floodgate
 loadbefore:
   - GriefPrevention

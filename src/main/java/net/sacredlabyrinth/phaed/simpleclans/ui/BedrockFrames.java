@@ -1,7 +1,7 @@
 package net.sacredlabyrinth.phaed.simpleclans.ui;
 
-import net.hypedmc.network.shared.bedrock.HypedBedrockAPI;
-import net.hypedmc.network.shared.bedrock.SimpleFormBuilder;
+import net.hypedmc.bedrock.HypedBedrockAPI;
+import net.hypedmc.bedrock.SimpleFormBuilder;
 import net.sacredlabyrinth.phaed.simpleclans.ClanPlayer;
 import net.sacredlabyrinth.phaed.simpleclans.RankPermission;
 import net.sacredlabyrinth.phaed.simpleclans.SimpleClans;
@@ -37,7 +37,7 @@ import java.util.List;
  * verificado, permissão do rank e confirmação obrigatória. Frames de aviso e de
  * confirmação também passam por aqui, então continuam funcionando no Bedrock.
  *
- * O HypedNetwork (que carrega o Floodgate) é <b>softdepend</b>: sem ele
+ * O HypedBedrockAPI (que carrega o Floodgate) é <b>softdepend</b>: sem ele
  * {@link #isBedrock(Player)} devolve {@code false} e o inventário abre como
  * sempre.
  */
@@ -46,7 +46,7 @@ public final class BedrockFrames {
     /**
      * Resolvido uma vez. Enquanto for {@code false} nenhuma classe da API é
      * tocada — a JVM só resolve uma referência na primeira instrução que a usa,
-     * então servidor sem o HypedNetwork nunca vê NoClassDefFoundError.
+     * então servidor sem o HypedBedrockAPI nunca vê NoClassDefFoundError.
      */
     private static final boolean AVAILABLE = isApiOnClasspath();
 
@@ -55,7 +55,7 @@ public final class BedrockFrames {
 
     private static boolean isApiOnClasspath() {
         try {
-            Class.forName("net.hypedmc.network.shared.bedrock.HypedBedrockAPI");
+            Class.forName("net.hypedmc.bedrock.HypedBedrockAPI");
             return true;
         } catch (Throwable ignored) {
             return false;

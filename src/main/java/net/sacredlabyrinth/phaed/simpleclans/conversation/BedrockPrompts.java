@@ -1,6 +1,6 @@
 package net.sacredlabyrinth.phaed.simpleclans.conversation;
 
-import net.hypedmc.network.shared.bedrock.HypedBedrockAPI;
+import net.hypedmc.bedrock.HypedBedrockAPI;
 import net.sacredlabyrinth.phaed.simpleclans.SimpleClans;
 import net.sacredlabyrinth.phaed.simpleclans.ui.BedrockFrames;
 import org.bukkit.Bukkit;
