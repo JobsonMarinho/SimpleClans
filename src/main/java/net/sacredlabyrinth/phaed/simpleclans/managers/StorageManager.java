@@ -30,9 +30,13 @@ import java.text.MessageFormat;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
 
+import static net.sacredlabyrinth.phaed.simpleclans.SimpleClans.debug;
 import static net.sacredlabyrinth.phaed.simpleclans.SimpleClans.lang;
 import static net.sacredlabyrinth.phaed.simpleclans.managers.SettingsManager.ConfigField.*;
 
@@ -799,6 +803,78 @@ public final class StorageManager {
             plugin.getLogger().log(Level.SEVERE, "Error retrieving ClanPlayer by uuid: " + uuid, ex);
         }
         return null;
+    }
+
+    /**
+     * Brings into the cache a player whose row exists in the database but not in
+     * this server's memory - typically first seen on another server sharing the
+     * database, or created while this server missed the network update.
+     * <p>
+     * Must run off the main thread (e.g. AsyncPlayerPreLoginEvent): the reads
+     * happen here and the import is handed to the main thread, blocking until it
+     * is done. Without it, the join would create a blank ClanPlayer, fail the
+     * INSERT on the unique uuid and later overwrite the real row with that blank.
+     *
+     * @param uuid the player about to join
+     */
+    public void loadMissingClanPlayer(@NotNull UUID uuid) {
+        if (plugin.getClanManager().getAnyClanPlayer(uuid) != null) {
+            return;
+        }
+        ClanPlayer loaded = null;
+        String tag = null;
+        String query = "SELECT * FROM `" + getPrefixedTable("players") + "` WHERE `uuid` = ?;";
+        try (Connection connection = core.getConnection();
+             PreparedStatement ps = connection.prepareStatement(query)) {
+            ps.setString(1, uuid.toString());
+            try (ResultSet res = ps.executeQuery()) {
+                if (res.next()) {
+                    loaded = buildClanPlayerFromResultSet(res);
+                    tag = res.getString("tag");
+                }
+            }
+        } catch (SQLException ex) {
+            plugin.getLogger().log(Level.SEVERE, "Error loading ClanPlayer " + uuid, ex);
+            return;
+        }
+        if (loaded == null) {
+            return; // really new: the join creates it
+        }
+        // the clan may be unknown here as well (created on the other server)
+        Clan clanDB = tag != null && !tag.isEmpty() && plugin.getClanManager().getClan(tag) == null
+                ? retrieveOneClan(tag) : null;
+
+        final ClanPlayer cp = loaded;
+        final String clanTag = tag;
+        Future<?> task = Bukkit.getScheduler().callSyncMethod(plugin, () -> {
+            ClanManager clanManager = plugin.getClanManager();
+            // the network may have delivered it while we were reading
+            if (clanManager.getAnyClanPlayer(uuid) != null) {
+                return null;
+            }
+            if (clanTag != null && !clanTag.isEmpty()) {
+                Clan clan = clanManager.getClan(clanTag);
+                if (clan == null && clanDB != null) {
+                    clanManager.importClan(clanDB);
+                    clanDB.validateWarring();
+                    clan = clanDB;
+                }
+                if (clan != null) {
+                    cp.setClan(clan);
+                    clan.importMember(cp);
+                }
+            }
+            clanManager.importClanPlayer(cp);
+            debug("Loaded clan player " + cp.getName() + " from the database");
+            return null;
+        });
+        try {
+            task.get(10, TimeUnit.SECONDS);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        } catch (ExecutionException | TimeoutException ex) {
+            plugin.getLogger().log(Level.SEVERE, "Error importing ClanPlayer " + uuid, ex);
+        }
     }
 
     /**

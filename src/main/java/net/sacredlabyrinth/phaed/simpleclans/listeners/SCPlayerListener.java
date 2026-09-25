@@ -77,6 +77,17 @@ public class SCPlayerListener extends SCListener {
         }
     }
 
+    // MONITOR: only players really allowed in are loaded
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onAsyncPreLogin(AsyncPlayerPreLoginEvent event) {
+        if (event.getLoginResult() != AsyncPlayerPreLoginEvent.Result.ALLOWED) {
+            return;
+        }
+        // the row may exist in the shared database without being in this server's
+        // cache; loaded now so the join below does not create a blank duplicate
+        plugin.getStorageManager().loadMissingClanPlayer(event.getUniqueId());
+    }
+
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event) {
         final Player player = event.getPlayer();
