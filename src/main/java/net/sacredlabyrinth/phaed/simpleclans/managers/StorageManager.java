@@ -387,9 +387,9 @@ public final class StorageManager {
 
         for (ClanPlayer cp : purge) {
             plugin.getLogger().info(lang("purging.player.data", cp.getName()));
-            deleteClanPlayer(cp);
             cps.remove(cp);
         }
+        deleteClanPlayers(purge);
     }
 
     /**
@@ -1636,6 +1636,63 @@ public final class StorageManager {
     }
 
     /**
+     * Deletes many clan players at once (the boot purge): a few batched DELETEs
+     * run one after the other in a single task, instead of two concurrent tasks
+     * per player that exhaust the connection pool.
+     */
+    private void deleteClanPlayers(List<ClanPlayer> cps) {
+        if (cps.isEmpty()) {
+            return;
+        }
+        Set<Clan> touchedClans = Collections.newSetFromMap(new IdentityHashMap<>());
+        List<String> uuids = new ArrayList<>();
+        for (ClanPlayer cp : cps) {
+            modifiedClanPlayers.remove(cp);
+            Clan clan = cp.getClan();
+            if (clan != null) {
+                clan.addBbWithoutSaving(MessageFormat.format(lang("has.been.purged"), cp.getName()));
+                touchedClans.add(clan);
+            }
+            plugin.getProxyManager().sendDelete(cp);
+            if (cp.getUniqueId() != null) {
+                uuids.add(cp.getUniqueId().toString());
+            }
+        }
+        touchedClans.forEach(clan -> updateClan(clan, false));
+
+        Runnable delete = () -> {
+            for (int from = 0; from < uuids.size(); from += 500) {
+                List<String> chunk = uuids.subList(from, Math.min(from + 500, uuids.size()));
+                deleteByUuids("players", "uuid", chunk);
+                deleteByUuids("kills", "attacker_uuid", chunk);
+            }
+        };
+        if (plugin.getSettingsManager().is(PERFORMANCE_USE_THREADS)) {
+            Bukkit.getScheduler().runTaskAsynchronously(plugin, delete);
+        } else {
+            delete.run();
+        }
+    }
+
+    private void deleteByUuids(String table, String column, List<String> uuids) {
+        String placeholders = String.join(",", Collections.nCopies(uuids.size(), "?"));
+        String query = "DELETE FROM `" + getPrefixedTable(table) + "` WHERE `" + column + "` IN (" + placeholders + ");";
+        Connection connection = core.getConnection();
+        if (connection == null) {
+            return;
+        }
+        try (Connection conn = connection;
+             PreparedStatement ps = conn.prepareStatement(query)) {
+            for (int i = 0; i < uuids.size(); i++) {
+                ps.setString(i + 1, uuids.get(i));
+            }
+            ps.executeUpdate();
+        } catch (SQLException ex) {
+            plugin.getLogger().log(Level.SEVERE, "Error purging " + uuids.size() + " player(s) from " + table, ex);
+        }
+    }
+
+    /**
      * Insert a kill into the database
      *
      */
@@ -1895,6 +1952,32 @@ public final class StorageManager {
             query = "ALTER TABLE `" + getPrefixedTable("kills") + "` ADD `created_at` datetime NULL;";
             core.execute(query);
         }
+
+        // kill lookups and the player purge filter by these columns; without an
+        // index each DELETE scans the whole table and locks the ones running beside it
+        createIndexIfMissing("kills", "idx_kills_attacker_uuid", "attacker_uuid");
+        createIndexIfMissing("kills", "idx_kills_victim_uuid", "victim_uuid");
+    }
+
+    private void createIndexIfMissing(String table, String index, String column) {
+        String prefixed = getPrefixedTable(table);
+        Connection connection = core.getConnection();
+        if (connection == null) {
+            return;
+        }
+        try (Connection conn = connection;
+             ResultSet indexes = conn.getMetaData().getIndexInfo(null, null, prefixed, false, false)) {
+            while (indexes.next()) {
+                if (column.equalsIgnoreCase(indexes.getString("COLUMN_NAME"))) {
+                    return;
+                }
+            }
+        } catch (SQLException ex) {
+            plugin.getLogger().log(Level.WARNING, "Could not check the indexes of " + prefixed, ex);
+            return;
+        }
+        plugin.getLogger().info(String.format("Creating index %s on %s(%s)...", index, prefixed, column));
+        core.execute("CREATE INDEX `" + index + "` ON `" + prefixed + "` (`" + column + "`);");
     }
 
     /**
