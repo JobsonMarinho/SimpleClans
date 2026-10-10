@@ -74,7 +74,7 @@ public interface DBCore {
             return false;
         }
         try (Connection conn = connection;
-             ResultSet tables = conn.getMetaData().getTables(null, null, table, null)) {
+             ResultSet tables = conn.getMetaData().getTables(conn.getCatalog(), null, table, null)) {
             return tables.next();
         } catch (SQLException ex) {
             log.log(Level.SEVERE, String.format("Error checking if table %s exists", table), ex);
@@ -95,7 +95,7 @@ public interface DBCore {
             return false;
         }
         try (Connection conn = connection;
-             ResultSet col = conn.getMetaData().getColumns(null, null, table, column)) {
+             ResultSet col = conn.getMetaData().getColumns(conn.getCatalog(), null, table, column)) {
             return col.next();
         } catch (Exception ex) {
             log.log(Level.SEVERE, String.format("Error checking if column %s exists in table %s", column, table), ex);

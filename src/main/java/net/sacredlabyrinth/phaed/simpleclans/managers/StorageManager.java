@@ -1966,7 +1966,7 @@ public final class StorageManager {
             return;
         }
         try (Connection conn = connection;
-             ResultSet indexes = conn.getMetaData().getIndexInfo(null, null, prefixed, false, false)) {
+             ResultSet indexes = conn.getMetaData().getIndexInfo(conn.getCatalog(), null, prefixed, false, false)) {
             while (indexes.next()) {
                 if (column.equalsIgnoreCase(indexes.getString("COLUMN_NAME"))) {
                     return;
