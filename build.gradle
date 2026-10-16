@@ -52,6 +52,7 @@ dependencies {
         exclude group: 'org.json', module: 'json'
         exclude group: 'com.google.code.gson', module: 'gson'
     }
+    implementation 'io.airlift:aircompressor:0.27'
 
     // --- Not bundled (Maven "provided" scope); annotations excluded from shading ---
     compileOnly 'org.spigotmc:spigot-api:1.16.4-R0.1-SNAPSHOT'
@@ -125,6 +126,7 @@ shadowJar {
     relocate 'org.slf4j', 'net.sacredlabyrinth.phaed.simpleclans.slf4j'
     relocate 'redis.clients.jedis', 'net.sacredlabyrinth.phaed.simpleclans.jedis'
     relocate 'org.apache.commons.pool2', 'net.sacredlabyrinth.phaed.simpleclans.pool2'
+    relocate 'io.airlift.compress', 'net.sacredlabyrinth.phaed.simpleclans.aircompressor'
 }
 
 // Make `build` produce the shaded jar (Maven shade ran on `package`)

@@ -7,8 +7,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.text.SimpleDateFormat;
-import java.util.Date;
+import java.time.LocalDate;
 import java.util.logging.*;
 
 import static net.sacredlabyrinth.phaed.simpleclans.managers.SettingsManager.ConfigField.DEBUG;
@@ -32,6 +31,10 @@ public class CSVBankLogger implements BankLogger {
 
     private final Logger logger = Logger.getLogger(getClass().getSimpleName());
     private final SimpleClans plugin;
+    /** FileHandler currently attached to {@link #logger}; null when disabled. */
+    private FileHandler currentHandler;
+    /** The date the current FileHandler was opened for. */
+    private LocalDate handlerDate;
 
     static final int FILE_SIZE = (int) (100 * Math.pow(10, 6));
     static final int FILE_COUNT = 1;
@@ -43,35 +46,66 @@ public class CSVBankLogger implements BankLogger {
             return;
         }
 
-        try {
-            FileHandler fh = new FileHandler(getFilePath(), FILE_SIZE, FILE_COUNT, true);
-            fh.setFormatter(new CSVFormatter());
-            fh.setLevel(Level.INFO);
-            fh.setEncoding("UTF-8");
-            logger.addHandler(fh);
-            if (!plugin.getSettingsManager().is(DEBUG)) {
-                logger.setUseParentHandlers(false);
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
+        openHandlerForDate(LocalDate.now());
+        if (!plugin.getSettingsManager().is(DEBUG)) {
+            logger.setUseParentHandlers(false);
         }
     }
 
     @Override
-    public void log(BankLog log) {
+    public synchronized void log(BankLog log) {
         if (!plugin.getSettingsManager().is(ECONOMY_BANK_LOG_ENABLED)) {
             return;
+        }
+        // Swap handler if the calendar day changed.
+        LocalDate today = LocalDate.now();
+        if (!today.equals(handlerDate)) {
+            closeHandler();
+            openHandlerForDate(today);
         }
 
         logger.log(Level.INFO, toCSV(log));
     }
 
-    @SuppressWarnings("ResultOfMethodCallIgnored")
+    /** Closes the current FileHandler cleanly; called by SimpleClans.onDisable() or on rollover. */
+    public synchronized void close() {
+        closeHandler();
+    }
+
+    private void openHandlerForDate(LocalDate date) {
+        try {
+            FileHandler fh = new FileHandler(getFilePath(date), FILE_SIZE, FILE_COUNT, true);
+            fh.setFormatter(new CSVFormatter());
+            fh.setLevel(Level.INFO);
+            fh.setEncoding("UTF-8");
+            logger.addHandler(fh);
+            currentHandler = fh;
+            handlerDate = date;
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void closeHandler() {
+        if (currentHandler != null) {
+            logger.removeHandler(currentHandler);
+            currentHandler.close();
+            currentHandler = null;
+            handlerDate = null;
+        }
+    }
+
+    /** Returns today's file path (kept for tests). */
     @NotNull
     String getFilePath() {
-        SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd");
+        return getFilePath(LocalDate.now());
+    }
+
+    @SuppressWarnings("ResultOfMethodCallIgnored")
+    @NotNull
+    String getFilePath(LocalDate date) {
         String folderPath = plugin.getDataFolder().getPath() + File.separator + "logs" + File.separator + "bank";
-        String filePath = folderPath + File.separator + dateFormat.format(new Date()) + ".csv";
+        String filePath = folderPath + File.separator + date.toString() + ".csv";
 
         File folder = new File(folderPath);
         if (!folder.exists()) {

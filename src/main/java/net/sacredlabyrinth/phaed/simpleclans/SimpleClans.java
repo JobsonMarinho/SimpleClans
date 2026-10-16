@@ -7,6 +7,10 @@ import net.sacredlabyrinth.phaed.simpleclans.hooks.discord.webhook.DiscordWebhoo
 import net.sacredlabyrinth.phaed.simpleclans.hooks.papi.SimpleClansExpansion;
 import net.sacredlabyrinth.phaed.simpleclans.language.LanguageResource;
 import net.sacredlabyrinth.phaed.simpleclans.listeners.*;
+import net.sacredlabyrinth.phaed.simpleclans.logarchive.LogArchiveKit.LogArchiveRule;
+import net.sacredlabyrinth.phaed.simpleclans.logarchive.LogArchiveKit.LogArchiveSettings;
+import net.sacredlabyrinth.phaed.simpleclans.logarchive.LogArchiveKit.LogArchiver;
+import net.sacredlabyrinth.phaed.simpleclans.logarchive.LogArchiveKit.LogBundle;
 import net.sacredlabyrinth.phaed.simpleclans.loggers.BankLogger;
 import net.sacredlabyrinth.phaed.simpleclans.loggers.CSVBankLogger;
 import net.sacredlabyrinth.phaed.simpleclans.managers.*;
@@ -32,8 +36,11 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.io.File;
 import java.text.MessageFormat;
+import java.time.Clock;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.logging.Level;
@@ -68,6 +75,7 @@ public class SimpleClans extends JavaPlugin {
     private static final Pattern ACF_PLACEHOLDER_PATTERN = Pattern.compile("\\{(?<key>[a-zA-Z]+?)}");
 
     private BankLogger bankLogger;
+    private LogArchiver logArchiver;
     private TagValidator tagValidator;
     private TagReservationManager tagReservationManager;
     private DiscordWebhookService discordWebhookService;
@@ -133,6 +141,8 @@ public class SimpleClans extends JavaPlugin {
         commandManager = new SCCommandManager(this);
         bankLogger = new CSVBankLogger(this);
 
+        startLogArchiver();
+
         tagValidator = new TagValidator(settingsManager, permissionsManager);
 
         // only now: the clan cache is loaded, so an incoming update is applied
@@ -189,6 +199,27 @@ public class SimpleClans extends JavaPlugin {
         }
     }
 
+    private void startLogArchiver() {
+        File logsFolder = new File(getDataFolder(), "logs");
+        File bankFolder = new File(logsFolder, "bank");
+        List<LogArchiveRule> rules = Arrays.asList(
+                // Bank CSVs are financial records — retain forever (retention=0 = never delete).
+                LogArchiveRule.builder("bank", bankFolder, LogBundle.MONTH, 0).build(),
+                // Discord webhook audit — 30 days.
+                LogArchiveRule.builder("discord", logsFolder, LogBundle.MONTH, 30)
+                        .prefix("discord-").rotateUndated(true)
+                        .undatedNames(new java.util.HashSet<>(java.util.Collections.singleton("discord.log"))).build()
+        );
+        logArchiver = new LogArchiver(
+                () -> rules,
+                () -> LogArchiveSettings.DEFAULT,
+                getLogger(),
+                Clock.systemDefaultZone(),
+                "SimpleClans-LogArchiver"
+        );
+        logArchiver.start();
+    }
+
     private void startMetrics() {
         Metrics metrics = new Metrics(this, 7131);
         SettingsManager sm = getSettingsManager();
@@ -241,6 +272,14 @@ public class SimpleClans extends JavaPlugin {
         }
         if (discordWebhookService != null) {
             discordWebhookService.shutdown();
+        }
+        // Flush bank CSV and stop archiver before the plugin folder is released.
+        if (bankLogger instanceof CSVBankLogger) {
+            ((CSVBankLogger) bankLogger).close();
+        }
+        if (logArchiver != null) {
+            logArchiver.stop();
+            logArchiver = null;
         }
         getStorageManager().closeConnection();
         getPermissionsManager().savePermissions();
